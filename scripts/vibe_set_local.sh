@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
+VIBE_LOCAL_MODEL_ID="${VIBE_LOCAL_MODEL_ID:-mlx-community/Devstral-2-123B-Instruct-2512-6bit}"
+VIBE_LOCAL_PROVIDER_NAME="${VIBE_LOCAL_PROVIDER_NAME:-mlx-local}"
+VIBE_LOCAL_API_BASE="${VIBE_LOCAL_API_BASE:-http://127.0.0.1:8080/v1}"
+
 CONFIG_PATH="${VIBE_CONFIG_PATH:-}"
 if [[ -z "${CONFIG_PATH}" ]]; then
   CONFIG_PATH="${HOME}/.vibe/config.toml"
@@ -26,24 +30,145 @@ EOF
   exit 0
 fi
 
-python3 - "${CONFIG_PATH}" <<'PY'
+python3 - "${CONFIG_PATH}" "${VIBE_LOCAL_MODEL_ID}" "${VIBE_LOCAL_PROVIDER_NAME}" "${VIBE_LOCAL_API_BASE}" <<'PY'
 import re
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
+model_id = sys.argv[2]
+provider_name = sys.argv[3]
+api_base = sys.argv[4]
+
 text = path.read_text(encoding="utf-8")
+lines = text.splitlines(keepends=True)
 
-pattern = re.compile(r'(?m)^active_model\s*=\s*"[^\"]*"\s*$')
-if pattern.search(text):
-    text = pattern.sub('active_model = "local"', text, count=1)
-else:
-    text = 'active_model = "local"\n' + text
 
-if not text.endswith("\n"):
-    text += "\n"
+def set_top_level_key(lines_in: list[str], key: str, value: str) -> list[str]:
+    pat = re.compile(rf'(?m)^{re.escape(key)}\s*=\s*"[^\"]*"\s*$')
+    joined = "".join(lines_in)
+    if pat.search(joined):
+        joined = pat.sub(f'{key} = "{value}"', joined, count=1)
+        return joined.splitlines(keepends=True)
 
-path.write_text(text, encoding="utf-8")
+    # Insert at top (after initial comment/header lines if any)
+    insert_at = 0
+    for i, line in enumerate(lines_in):
+        if line.lstrip().startswith("#") or line.strip() == "":
+            continue
+        insert_at = i
+        break
+    return lines_in[:insert_at] + [f'{key} = "{value}"\n'] + lines_in[insert_at:]
+
+
+def iter_table_blocks(lines_in: list[str], header: str) -> list[tuple[int, int]]:
+    blocks: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines_in):
+        if lines_in[i].strip() == header:
+            start = i
+            i += 1
+            while i < len(lines_in) and not lines_in[i].lstrip().startswith("[["):
+                i += 1
+            blocks.append((start, i))
+        else:
+            i += 1
+    return blocks
+
+
+def parse_kv(block_lines: list[str]) -> dict[str, tuple[str, int]]:
+    out: dict[str, tuple[str, int]] = {}
+    kv_re = re.compile(r'^\s*([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*$')
+    for idx, line in enumerate(block_lines):
+        m = kv_re.match(line)
+        if not m:
+            continue
+        out[m.group(1)] = (m.group(2), idx)
+    return out
+
+
+def set_kv(block_lines: list[str], key: str, value: str) -> list[str]:
+    kv = parse_kv(block_lines)
+    if key in kv:
+        _, idx = kv[key]
+        block_lines[idx] = f'{key} = "{value}"\n'
+        return block_lines
+    # Insert after header line
+    return [block_lines[0]] + [f'{key} = "{value}"\n'] + block_lines[1:]
+
+
+def ensure_provider(lines_in: list[str]) -> list[str]:
+    blocks = iter_table_blocks(lines_in, "[[providers]]")
+    for start, end in blocks:
+        blk = lines_in[start:end]
+        kv = parse_kv(blk)
+        if kv.get("name", ("", -1))[0] == provider_name:
+            blk = set_kv(blk, "api_base", api_base)
+            blk = set_kv(blk, "api_style", "openai")
+            blk = set_kv(blk, "backend", "generic")
+            blk = set_kv(blk, "api_key_env_var", "")
+            blk = set_kv(blk, "reasoning_field_name", "reasoning_content")
+            return lines_in[:start] + blk + lines_in[end:]
+
+    # Append a new provider block
+    if lines_in and not lines_in[-1].endswith("\n"):
+        lines_in[-1] += "\n"
+    if lines_in and lines_in[-1].strip() != "":
+        lines_in.append("\n")
+    lines_in.extend(
+        [
+            "[[providers]]\n",
+            f'name = "{provider_name}"\n',
+            f'api_base = "{api_base}"\n',
+            'api_key_env_var = ""\n',
+            'api_style = "openai"\n',
+            'backend = "generic"\n',
+            'reasoning_field_name = "reasoning_content"\n',
+            "\n",
+        ]
+    )
+    return lines_in
+
+
+def ensure_local_model(lines_in: list[str]) -> list[str]:
+    blocks = iter_table_blocks(lines_in, "[[models]]")
+    for start, end in blocks:
+        blk = lines_in[start:end]
+        kv = parse_kv(blk)
+        if kv.get("alias", ("", -1))[0] == "local":
+            blk = set_kv(blk, "provider", provider_name)
+            blk = set_kv(blk, "name", model_id)
+            return lines_in[:start] + blk + lines_in[end:]
+
+    # Append a new model block
+    if lines_in and not lines_in[-1].endswith("\n"):
+        lines_in[-1] += "\n"
+    if lines_in and lines_in[-1].strip() != "":
+        lines_in.append("\n")
+    lines_in.extend(
+        [
+            "[[models]]\n",
+            f'name = "{model_id}"\n',
+            f'provider = "{provider_name}"\n',
+            'alias = "local"\n',
+            "temperature = 0.2\n",
+            "input_price = 0.0\n",
+            "output_price = 0.0\n",
+            "\n",
+        ]
+    )
+    return lines_in
+
+
+lines = set_top_level_key(lines, "active_model", "local")
+lines = ensure_provider(lines)
+lines = ensure_local_model(lines)
+
+out = "".join(lines)
+if not out.endswith("\n"):
+    out += "\n"
+path.write_text(out, encoding="utf-8")
+
 PY
 
 echo "set active_model=local in ${CONFIG_PATH}"
