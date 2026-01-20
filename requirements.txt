@@ -1,0 +1,3 @@
+# Pinned to known-good Apple Silicon wheels (Jan 2026)
+mlx==0.30.3
+mlx-lm==0.30.4

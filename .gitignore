@@ -1,0 +1,6 @@
+.venv/
+.hf/
+.run/
+.vibe/
+*.log
+.DS_Store
