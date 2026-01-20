@@ -63,7 +63,6 @@ scripts/vibe_unset_local.sh
 ```
 
 By default these scripts edit:
-- `./.vibe/config.toml` if it exists, otherwise
 - `~/.vibe/config.toml`
 
 Override with:
