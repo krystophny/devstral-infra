@@ -20,8 +20,8 @@ class LimitedResponseGenerator(s.ResponseGenerator):
         return tokens
 
 def main() -> None:
-    # Default to 128k prompt budget unless overridden.
-    max_prompt_tokens = int(os.environ.get("DEVSTRAL_MAX_PROMPT_TOKENS", "131072"))
+    # Default to ~200k prompt budget unless overridden.
+    max_prompt_tokens = int(os.environ.get("DEVSTRAL_MAX_PROMPT_TOKENS", "200000"))
 
     class PatchedResponseGenerator(LimitedResponseGenerator):
         def __init__(self, *args, **kwargs):
