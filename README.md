@@ -4,7 +4,7 @@ This repo sets up a local OpenAI-compatible server for:
 
 - `mlx-community/Devstral-2-123B-Instruct-2512-6bit`
 - Target: Mac Studio (M3 Ultra, 256GB unified memory)
-- Prompt budget: **128k tokens** (hard limit via `DEVSTRAL_MAX_PROMPT_TOKENS=131072`)
+- Prompt budget: **200k tokens** (hard limit via `DEVSTRAL_MAX_PROMPT_TOKENS=200000`)
 
 ## Setup
 
@@ -35,7 +35,7 @@ Override defaults (examples):
 
 ```bash
 DEVSTRAL_PORT=8080 DEVSTRAL_MAX_TOKENS=2048 scripts/server_start.sh
-DEVSTRAL_MAX_PROMPT_TOKENS=131072 scripts/server_start.sh
+DEVSTRAL_MAX_PROMPT_TOKENS=200000 scripts/server_start.sh
 ```
 
 Sanity check:

@@ -61,6 +61,22 @@ def set_top_level_key(lines_in: list[str], key: str, value: str) -> list[str]:
     return lines_in[:insert_at] + [f'{key} = "{value}"\n'] + lines_in[insert_at:]
 
 
+def set_top_level_int(lines_in: list[str], key: str, value: int) -> list[str]:
+    pat = re.compile(rf"(?m)^{re.escape(key)}\s*=\s*[0-9_]+\s*$")
+    joined = "".join(lines_in)
+    if pat.search(joined):
+        joined = pat.sub(f"{key} = {value}", joined, count=1)
+        return joined.splitlines(keepends=True)
+
+    # Insert at top (after initial comment/header lines if any)
+    insert_at = 0
+    for i, line in enumerate(lines_in):
+        if line.lstrip().startswith("#") or line.strip() == "":
+            continue
+        insert_at = i
+        break
+    return lines_in[:insert_at] + [f"{key} = {value}\n"] + lines_in[insert_at:]
+
 def iter_table_blocks(lines_in: list[str], header: str) -> list[tuple[int, int]]:
     blocks: list[tuple[int, int]] = []
     i = 0
@@ -161,6 +177,7 @@ def ensure_local_model(lines_in: list[str]) -> list[str]:
 
 
 lines = set_top_level_key(lines, "active_model", "local")
+lines = set_top_level_int(lines, "auto_compact_threshold", 200000)
 lines = ensure_provider(lines)
 lines = ensure_local_model(lines)
 
