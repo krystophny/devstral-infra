@@ -62,13 +62,24 @@ Unset (restore from backup):
 scripts/vibe_unset_local.sh
 ```
 
-By default these scripts edit:
-- `~/.vibe/config.toml`
+By default these scripts edit `~/.vibe/config.toml` and:
+- set `active_model = "local"`
+- ensure a provider named `mlx-local` points at `http://127.0.0.1:8080/v1`
+- ensure the `"local"` model uses `mlx-community/Devstral-2-123B-Instruct-2512-6bit`
 
 Override with:
 
 ```bash
 VIBE_CONFIG_PATH=/path/to/config.toml scripts/vibe_set_local.sh
+```
+
+Override model/provider/url:
+
+```bash
+VIBE_LOCAL_MODEL_ID=mlx-community/Devstral-2-123B-Instruct-2512-6bit \
+VIBE_LOCAL_PROVIDER_NAME=mlx-local \
+VIBE_LOCAL_API_BASE=http://127.0.0.1:8080/v1 \
+scripts/vibe_set_local.sh
 ```
 
 ## Teardown (remove local env + caches)
