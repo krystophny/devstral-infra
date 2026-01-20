@@ -7,11 +7,7 @@ source "${SCRIPT_DIR}/_common.sh"
 
 CONFIG_PATH="${VIBE_CONFIG_PATH:-}"
 if [[ -z "${CONFIG_PATH}" ]]; then
-  if [[ -f "${REPO_ROOT}/.vibe/config.toml" ]]; then
-    CONFIG_PATH="${REPO_ROOT}/.vibe/config.toml"
-  else
-    CONFIG_PATH="${HOME}/.vibe/config.toml"
-  fi
+  CONFIG_PATH="${HOME}/.vibe/config.toml"
 fi
 
 BACKUP_PATH="${CONFIG_PATH}.devstral-infra.bak"
