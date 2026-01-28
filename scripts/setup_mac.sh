@@ -9,12 +9,16 @@ source "${SCRIPT_DIR}/_common.sh"
 
 VLLM_METAL_VENV="${HOME}/.venv-vllm-metal"
 
-echo "installing vllm-metal..."
-curl -sSL https://raw.githubusercontent.com/vllm-project/vllm-metal/main/install.sh | bash
+# Use our fork with vLLM 0.14.1 for transformers 5.x compatibility
+# See: https://github.com/krystophny/vllm-metal/issues/6
+VLLM_METAL_FORK_BRANCH="${VLLM_METAL_FORK_BRANCH:-fix-transformers-5-compat}"
+VLLM_METAL_FORK_REPO="${VLLM_METAL_FORK_REPO:-krystophny/vllm-metal}"
 
-echo "fixing dependency versions..."
-uv pip install "transformers>=4.56,<5" "torchvision>=0.25.0" \
-  --python "${VLLM_METAL_VENV}/bin/python"
+echo "installing vllm-metal from fork (${VLLM_METAL_FORK_REPO}@${VLLM_METAL_FORK_BRANCH})..."
+curl -sSL "https://raw.githubusercontent.com/${VLLM_METAL_FORK_REPO}/${VLLM_METAL_FORK_BRANCH}/install.sh" | bash
+
+echo "fixing torchvision version..."
+uv pip install "torchvision>=0.25.0" --python "${VLLM_METAL_VENV}/bin/python"
 
 if [[ -d "${VLLM_METAL_VENV}" ]]; then
   rm -rf "${VENV_DIR}"
