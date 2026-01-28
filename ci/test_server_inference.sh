@@ -23,13 +23,25 @@ cleanup() {
 trap cleanup EXIT
 
 download_model() {
-  if [[ -f "${MODEL_CACHE}" ]]; then
-    echo "Model already cached: ${MODEL_CACHE}"
-    return 0
-  fi
-  echo "Downloading Ministral 3B Q4_K_M (~2.15 GB)..."
   mkdir -p "$(dirname "${MODEL_CACHE}")"
-  curl -L -o "${MODEL_CACHE}" "${MODEL_URL}"
+
+  # Validate existing cache: GGUF files start with "GGUF" magic bytes
+  if [[ -f "${MODEL_CACHE}" ]]; then
+    if head -c 4 "${MODEL_CACHE}" 2>/dev/null | grep -q "GGUF"; then
+      local size_mb
+      size_mb=$(( $(stat -f%z "${MODEL_CACHE}" 2>/dev/null || stat -c%s "${MODEL_CACHE}" 2>/dev/null) / 1048576 ))
+      if [[ "${size_mb}" -gt 2000 ]]; then
+        echo "Model already cached and valid: ${MODEL_CACHE} (${size_mb} MB)"
+        return 0
+      fi
+    fi
+    echo "Cached model invalid or incomplete, re-downloading..."
+    rm -f "${MODEL_CACHE}"
+  fi
+
+  echo "Downloading Ministral 3B Q4_K_M (~2.15 GB)..."
+  curl -L --fail -o "${MODEL_CACHE}.tmp" "${MODEL_URL}"
+  mv "${MODEL_CACHE}.tmp" "${MODEL_CACHE}"
 }
 
 start_llama_server() {
