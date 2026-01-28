@@ -5,12 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
-MODEL="${DEVSTRAL_MODEL:-mlx-community/Devstral-2-123B-Instruct-2512-6bit}"
+migrate_legacy_pid
+
 HOST="${DEVSTRAL_HOST:-127.0.0.1}"
 PORT="${DEVSTRAL_PORT:-8080}"
-MAX_TOKENS="${DEVSTRAL_MAX_TOKENS:-1024}"
-MAX_PROMPT_TOKENS="${DEVSTRAL_MAX_PROMPT_TOKENS:-200000}"
-LOG_LEVEL="${DEVSTRAL_LOG_LEVEL:-INFO}"
 
 ensure_python_venv
 activate_venv
@@ -30,15 +28,19 @@ fi
 
 mkdir -p "${HF_HOME_DIR}" "${RUN_DIR}"
 
-export HF_HOME="${HF_HOME_DIR}"
-export DEVSTRAL_MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS}"
+config="$(auto_config)"
+MODEL="$(echo "${config}" | cut -d'|' -f1)"
+MAX_MODEL_LEN="$(echo "${config}" | cut -d'|' -f2)"
+EXTRA_FLAGS="$(echo "${config}" | cut -d'|' -f3)"
 
-nohup python "${REPO_ROOT}/server/run_devstral_mlx_server.py" \
-  --model "${MODEL}" \
-  --host "${HOST}" \
-  --port "${PORT}" \
-  --max-tokens "${MAX_TOKENS}" \
-  --log-level "${LOG_LEVEL}" \
+export HF_HOME="${HF_HOME_DIR}"
+export DEVSTRAL_MODEL="${MODEL}"
+export DEVSTRAL_HOST="${HOST}"
+export DEVSTRAL_PORT="${PORT}"
+export DEVSTRAL_MAX_MODEL_LEN="${MAX_MODEL_LEN}"
+export DEVSTRAL_EXTRA_FLAGS="${EXTRA_FLAGS}"
+
+nohup python "${REPO_ROOT}/server/run_devstral_server.py" \
   >"${LOG_FILE}" 2>&1 &
 
 pid=$!
@@ -47,5 +49,6 @@ echo "${PORT}" > "${PORT_FILE}"
 
 echo "started (pid ${pid})"
 echo "- model: ${MODEL}"
+echo "- max_model_len: ${MAX_MODEL_LEN}"
 echo "- url: http://${HOST}:${PORT}/v1"
 echo "- log: ${LOG_FILE}"

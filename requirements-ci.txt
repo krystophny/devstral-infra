@@ -1,0 +1,4 @@
+# CI-only dependencies
+# Used for smoke testing with Ministral 3B GGUF
+llama-cpp-python[server]>=0.3.0
+httpx>=0.27.0

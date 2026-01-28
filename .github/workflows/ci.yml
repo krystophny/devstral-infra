@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+      - name: Run shellcheck on scripts
+        run: |
+          shellcheck scripts/*.sh
+          shellcheck ci/*.sh
+
+  test-linux:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh ci/*.sh ci/*.py
+      - name: Run tests
+        run: bash ci/run_tests.sh
+
+  test-macos:
+    name: Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh ci/*.sh ci/*.py
+      - name: Run tests
+        run: bash ci/run_tests.sh
+
+  test-wsl:
+    name: Test (WSL)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup WSL
+        uses: Vampire/setup-wsl@v6
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: python3 python3-venv curl
+      - name: Run tests in WSL
+        shell: wsl-bash {0}
+        run: |
+          chmod +x scripts/*.sh ci/*.sh ci/*.py
+          bash ci/run_tests.sh
+
+  smoke-linux:
+    name: Smoke Test (Ministral 3B)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache model
+        uses: actions/cache@v4
+        with:
+          path: .hf/ministral-3b.gguf
+          key: ministral-3b-q4km-v1
+      - name: Install CI dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-ci.txt
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh ci/*.sh ci/*.py
+      - name: Run smoke test
+        env:
+          CI_SMOKE_TEST: "1"
+        run: bash ci/test_server_inference.sh
