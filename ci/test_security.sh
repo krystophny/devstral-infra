@@ -38,6 +38,22 @@ test_vibe_config_auto_update_disabled() {
   fi
 }
 
+test_vibe_config_update_checks_disabled() {
+  echo "TEST: Vibe config has update_checks disabled"
+  local cfg
+  cfg="$(mktemp)"
+  trap "rm -f ${cfg}" RETURN
+
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+
+  if grep -q 'enable_update_checks = false' "${cfg}"; then
+    echo "PASS: enable_update_checks is false"
+  else
+    echo "FAIL: enable_update_checks should be false to prevent phone-home"
+    return 1
+  fi
+}
+
 test_server_binds_localhost() {
   echo "TEST: Server start script defaults to localhost"
   if grep -q 'DEVSTRAL_HOST:-127.0.0.1' "${REPO_ROOT}/scripts/server_start.sh"; then
@@ -72,6 +88,7 @@ echo "=== Security Tests ==="
 
 test_vibe_config_no_api_key || FAILED=1
 test_vibe_config_auto_update_disabled || FAILED=1
+test_vibe_config_update_checks_disabled || FAILED=1
 test_server_binds_localhost || FAILED=1
 test_security_harden_script_exists || FAILED=1
 test_security_unharden_script_exists || FAILED=1
