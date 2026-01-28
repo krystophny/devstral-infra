@@ -1,3 +1,5 @@
-# Pinned to known-good Apple Silicon wheels (Jan 2026)
-mlx==0.30.3
-mlx-lm==0.30.4
+# vLLM: unified inference engine across all platforms
+# macOS: installed via vllm-metal curl installer (setup_mac.sh)
+# Linux/WSL CUDA: pip install vllm>=0.8.0
+# Linux CPU: pip install vllm>=0.8.0 --extra-index-url pytorch/cpu
+vllm>=0.8.0
