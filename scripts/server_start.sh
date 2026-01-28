@@ -29,7 +29,7 @@ platform="$(detect_platform)"
 
 if [[ "${platform}" == "mac" ]]; then
     # macOS: Use Ollama (native Metal, tool calling works)
-    OLLAMA_MODEL="${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-16k}"
+    OLLAMA_MODEL="${DEVSTRAL_OLLAMA_MODEL:-gpt-oss:20b-12k}"
     OLLAMA_PORT="${PORT}"
 
     # Check if Ollama is installed
@@ -87,7 +87,7 @@ else
 
     if [[ "${USE_OLLAMA}" == "1" ]]; then
         # Linux with Ollama fallback
-        OLLAMA_MODEL="${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-16k}"
+        OLLAMA_MODEL="${DEVSTRAL_OLLAMA_MODEL:-gpt-oss:20b-12k}"
 
         if ! have ollama; then
             die "Neither vLLM nor Ollama installed. Run: scripts/setup.sh"

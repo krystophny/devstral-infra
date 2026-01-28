@@ -53,16 +53,16 @@ install_ollama() {
         sleep 3
     fi
 
-    # Pull and configure model with 16k context for tool calling
-    BASE_MODEL="${DEVSTRAL_OLLAMA_BASE_MODEL:-glm-4.7-flash}"
-    MODEL="${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-16k}"
-    CONTEXT_SIZE=16384
+    # Pull and configure model with 12k context for tool calling
+    BASE_MODEL="${DEVSTRAL_OLLAMA_BASE_MODEL:-gpt-oss:20b}"
+    MODEL="${DEVSTRAL_OLLAMA_MODEL:-gpt-oss:20b-12k}"
+    CONTEXT_SIZE=12288
 
-    echo "pulling base model ${BASE_MODEL} (~19GB)..."
+    echo "pulling base model ${BASE_MODEL} (~14GB)..."
     ollama pull "${BASE_MODEL}"
 
-    # Create 16k context variant if needed
-    if [[ "${MODEL}" == *"-16k" ]] && ! ollama list 2>/dev/null | grep -q "^${MODEL}"; then
+    # Create 12k context variant if needed
+    if [[ "${MODEL}" == *"-12k" ]] && ! ollama list 2>/dev/null | grep -q "^${MODEL}"; then
         echo "Creating ${MODEL} with ${CONTEXT_SIZE} context..."
         cat > /tmp/Modelfile-setup <<EOF
 FROM ${BASE_MODEL}
@@ -105,7 +105,7 @@ EOF
 else
     cat <<EOF
 OK (Linux + Ollama, backend: ${gpu})
-- Model: ${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-16k}
+- Model: ${DEVSTRAL_OLLAMA_MODEL:-gpt-oss:20b-12k}
 
 Next:
 - Start server: scripts/server_start.sh
