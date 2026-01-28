@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/_common.sh"
 [[ "$(detect_platform)" == "mac" ]] || die "setup_mac.sh must run on macOS"
 
 # macOS uses Ollama (native Metal support, tool calling works)
-# Default to GLM-4.7-Flash with 16k context for OpenCode compatibility
+# Default to GLM-4.7-Flash with 12k context for OpenCode compatibility
 
 echo "=== Setting up Ollama on macOS ==="
 
@@ -22,11 +22,11 @@ if ! have ollama; then
     fi
 fi
 
-# Verify Ollama version (need 0.14.3+ for glm-4.7-flash)
+# Verify Ollama version (need 0.14.3+ for gpt-oss:20b)
 OLLAMA_VERSION="$(ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "0.0.0")"
 MIN_VERSION="0.14.3"
 if [[ "$(printf '%s\n' "${MIN_VERSION}" "${OLLAMA_VERSION}" | sort -V | head -1)" != "${MIN_VERSION}" ]]; then
-    warn "Ollama ${OLLAMA_VERSION} may be too old. glm-4.7-flash requires 0.14.3+"
+    warn "Ollama ${OLLAMA_VERSION} may be too old. gpt-oss:20b requires 0.14.3+"
 fi
 
 echo "Ollama version: ${OLLAMA_VERSION}"
@@ -38,16 +38,16 @@ if ! pgrep -x "ollama" >/dev/null 2>&1; then
     sleep 3
 fi
 
-# Pull and configure model with 16k context for tool calling
-BASE_MODEL="${DEVSTRAL_OLLAMA_BASE_MODEL:-glm-4.7-flash}"
-MODEL="${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-16k}"
-CONTEXT_SIZE=16384
+# Pull and configure model with 12k context for tool calling
+BASE_MODEL="${DEVSTRAL_OLLAMA_BASE_MODEL:-gpt-oss:20b}"
+MODEL="${DEVSTRAL_OLLAMA_MODEL:-gpt-oss:20b-12k}"
+CONTEXT_SIZE=12288
 
-echo "pulling base model ${BASE_MODEL} (~19GB)..."
+echo "pulling base model ${BASE_MODEL} (~14GB)..."
 ollama pull "${BASE_MODEL}"
 
-# Create 16k context variant if needed
-if [[ "${MODEL}" == *"-16k" ]] && ! ollama list 2>/dev/null | grep -q "^${MODEL}"; then
+# Create 12k context variant if needed
+if [[ "${MODEL}" == *"-12k" ]] && ! ollama list 2>/dev/null | grep -q "^${MODEL}"; then
     echo "Creating ${MODEL} with ${CONTEXT_SIZE} context..."
     cat > /tmp/Modelfile-setup <<EOF
 FROM ${BASE_MODEL}
