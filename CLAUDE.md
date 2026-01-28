@@ -56,8 +56,7 @@ scripts/vibe_set_local.sh
 **Configure OpenCode (recommended for tool calling):**
 ```bash
 scripts/opencode_install.sh
-scripts/opencode_set_local.sh
-ollama pull glm-4.7-flash
+scripts/opencode_set_local.sh  # Creates glm-4.7-flash-32k automatically
 ```
 
 **Security hardening (block network access):**
@@ -97,7 +96,7 @@ bash ci/run_tests.sh
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCODE_CONFIG_PATH` | ~/.config/opencode/opencode.json | Config file path |
-| `OPENCODE_LOCAL_MODEL_ID` | glm-4.7-flash | Model ID |
+| `OPENCODE_LOCAL_MODEL_ID` | glm-4.7-flash-32k | Model ID (32k context for tool calling) |
 | `OPENCODE_LOCAL_API_BASE` | http://localhost:11434/v1 | API endpoint |
 
 ## Architecture
@@ -158,13 +157,15 @@ ci/
 
 | Use Case | Model | Size | Why |
 |----------|-------|------|-----|
-| OpenCode (tool calling) | glm-4.7-flash | 19GB | Official Ollama recommendation, best agentic benchmark |
+| OpenCode (tool calling) | glm-4.7-flash-32k | 19GB + 5GB KV | 32k context required for tool calling |
 | Vibe (Mistral native) | devstral-small-2 | 15GB | Native Mistral tool calling format |
 | Linux NVIDIA | devstral-small-2 | 24GB | Full quality via vLLM |
 
+**Important:** OpenCode requires 16k-64k context for tool calling to work. The default Ollama 4k context causes tools to fail with "invalid tool" errors.
+
 **Performance on Apple Silicon (32GB):**
-- GLM-4.7-Flash: 40-60 tok/s with 4-8K context
-- Devstral-small-2: Similar performance
+- GLM-4.7-Flash-32k: 30-50 tok/s (32k context uses ~5GB extra for KV cache)
+- Devstral-small-2: 40-60 tok/s with default context
 
 ## Runtime Directories
 
@@ -174,7 +175,7 @@ ci/
 
 ## Key Constraints
 
-- macOS requires Ollama 0.14.3+ for glm-4.7-flash, 0.13.3+ for devstral-small-2
+- macOS requires Ollama 0.14.3+ for glm-4.7-flash-32k, 0.13.3+ for devstral-small-2
 - Linux requires Python 3.11+ for vLLM
 - OpenCode requires 64K+ context for best tool calling
 - Graceful shutdown has 30-second timeout before SIGTERM

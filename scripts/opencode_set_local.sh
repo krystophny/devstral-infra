@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure OpenCode for local Ollama server with GLM-4.7-Flash
+# Configure OpenCode for local Ollama server with GLM-4.7-Flash (32k context)
 # Reference: https://opencode.ai/docs/providers
 # Reference: https://docs.ollama.com/integrations/opencode
 set -euo pipefail
@@ -10,21 +10,35 @@ source "${SCRIPT_DIR}/_common.sh"
 
 platform="$(detect_platform)"
 
+# Default model with 32k context for proper tool calling
+# OpenCode requires at least 16k-64k context for tools to work
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-glm-4.7-flash-32k}"
+BASE_MODEL="glm-4.7-flash"
+CONTEXT_SIZE=32768
+
 if [[ "${platform}" == "mac" ]]; then
-    MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-glm-4.7-flash}"
     API_BASE="${OPENCODE_LOCAL_API_BASE:-http://localhost:11434/v1}"
 else
-    MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-glm-4.7-flash}"
     API_BASE="${OPENCODE_LOCAL_API_BASE:-http://127.0.0.1:11434/v1}"
 fi
 
-# Alternative models supported
-ALT_MODELS="qwen3-coder:30b devstral-small-2"
+# Create 32k context variant if it doesn't exist
+if ! ollama list 2>/dev/null | grep -q "${MODEL_ID}"; then
+    echo "Creating ${MODEL_ID} with ${CONTEXT_SIZE} context..."
+    if ! ollama list 2>/dev/null | grep -q "${BASE_MODEL}"; then
+        echo "Pulling base model ${BASE_MODEL}..."
+        ollama pull "${BASE_MODEL}"
+    fi
+    cat > /tmp/Modelfile-opencode <<EOF
+FROM ${BASE_MODEL}
+PARAMETER num_ctx ${CONTEXT_SIZE}
+EOF
+    ollama create "${MODEL_ID}" -f /tmp/Modelfile-opencode
+    rm -f /tmp/Modelfile-opencode
+    echo "Created ${MODEL_ID}"
+fi
 
-# OpenCode config locations (in priority order)
-# 1. ./.opencode.json (local directory)
-# 2. $XDG_CONFIG_HOME/opencode/.opencode.json
-# 3. $HOME/.opencode.json
+# OpenCode config location
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
 CONFIG_PATH="${OPENCODE_CONFIG_PATH:-${CONFIG_DIR}/opencode.json}"
 mkdir -p "$(dirname "${CONFIG_PATH}")"
@@ -58,13 +72,7 @@ cat > "${CONFIG_PATH}" <<EOF
       },
       "models": {
         "${MODEL_ID}": {
-          "name": "GLM 4.7 Flash (local)"
-        },
-        "qwen3-coder:30b": {
-          "name": "Qwen3 Coder 30B (local)"
-        },
-        "devstral-small-2": {
-          "name": "Devstral Small 2 (local)"
+          "name": "GLM 4.7 Flash 32k (local)"
         }
       }
     }
@@ -75,13 +83,8 @@ EOF
 echo "Configured OpenCode for local Ollama:"
 echo "- config: ${CONFIG_PATH}"
 echo "- model: ${MODEL_ID}"
+echo "- context: ${CONTEXT_SIZE} tokens"
 echo "- api_base: ${API_BASE}"
 echo ""
 echo "Usage:"
-echo "  1. Ensure Ollama is running: ollama serve"
-echo "  2. Pull model if needed: ollama pull ${MODEL_ID}"
-echo "  3. Run OpenCode: opencode"
-echo "  4. Select model with /models command"
-echo ""
-echo "For tool calling, increase context (if issues):"
-echo "  ollama run ${MODEL_ID} --num_ctx 16384"
+echo "  opencode -m ollama/${MODEL_ID}"
