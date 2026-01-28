@@ -53,10 +53,24 @@ install_ollama() {
         sleep 3
     fi
 
-    # Pull the model
-    MODEL="${DEVSTRAL_OLLAMA_MODEL:-devstral-small-2}"
-    echo "pulling model ${MODEL} (this may take a while, ~15GB)..."
-    ollama pull "${MODEL}"
+    # Pull and configure model with 32k context for tool calling
+    BASE_MODEL="${DEVSTRAL_OLLAMA_BASE_MODEL:-glm-4.7-flash}"
+    MODEL="${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-32k}"
+    CONTEXT_SIZE=32768
+
+    echo "pulling base model ${BASE_MODEL} (~19GB)..."
+    ollama pull "${BASE_MODEL}"
+
+    # Create 32k context variant if needed
+    if [[ "${MODEL}" == *"-32k" ]] && ! ollama list 2>/dev/null | grep -q "^${MODEL}"; then
+        echo "Creating ${MODEL} with ${CONTEXT_SIZE} context..."
+        cat > /tmp/Modelfile-setup <<EOF
+FROM ${BASE_MODEL}
+PARAMETER num_ctx ${CONTEXT_SIZE}
+EOF
+        ollama create "${MODEL}" -f /tmp/Modelfile-setup
+        rm -f /tmp/Modelfile-setup
+    fi
 }
 
 # Prefer vLLM on compatible Python, fall back to Ollama
@@ -91,10 +105,10 @@ EOF
 else
     cat <<EOF
 OK (Linux + Ollama, backend: ${gpu})
-- Model: ${DEVSTRAL_OLLAMA_MODEL:-devstral-small-2}
+- Model: ${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-32k}
 
 Next:
 - Start server: scripts/server_start.sh
-- Configure Vibe: scripts/vibe_set_local.sh
+- Configure OpenCode: scripts/opencode_set_local.sh
 EOF
 fi
