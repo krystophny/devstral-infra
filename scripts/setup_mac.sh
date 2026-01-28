@@ -7,58 +7,53 @@ source "${SCRIPT_DIR}/_common.sh"
 
 [[ "$(detect_platform)" == "mac" ]] || die "setup_mac.sh must run on macOS"
 
-# Use our fork with vLLM 0.14.x fixes
-VLLM_METAL_FORK_REPO="${VLLM_METAL_FORK_REPO:-krystophny/vllm-metal}"
-VLLM_METAL_FORK_BRANCH="${VLLM_METAL_FORK_BRANCH:-main}"
-VLLM_VERSION="${VLLM_VERSION:-0.14.1}"
+# macOS uses Ollama for Devstral (native Metal support, tool calling works)
+# vllm-metal has issues with official Mistral FP8 format
 
-echo "=== Setting up vllm-metal from fork (${VLLM_METAL_FORK_REPO}@${VLLM_METAL_FORK_BRANCH}) ==="
+echo "=== Setting up Ollama for Devstral on macOS ==="
 
-# Create venv
-echo "creating venv at ${VENV_DIR}..."
-rm -rf "${VENV_DIR}"
-uv venv "${VENV_DIR}" --python 3.12
-# shellcheck disable=SC1091
-source "${VENV_DIR}/bin/activate"
+# Install Ollama if not present
+if ! have ollama; then
+    echo "installing Ollama..."
+    if have brew; then
+        brew install ollama
+    else
+        curl -fsSL https://ollama.com/install.sh | sh
+    fi
+fi
 
-# Install vLLM from source tarball
-echo "installing vLLM ${VLLM_VERSION} from source..."
-VLLM_TARBALL="vllm-${VLLM_VERSION}.tar.gz"
-VLLM_URL="https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/${VLLM_TARBALL}"
+# Verify Ollama version (need 0.13.3+ for devstral-small-2)
+OLLAMA_VERSION="$(ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "0.0.0")"
+MIN_VERSION="0.13.3"
+if [[ "$(printf '%s\n' "${MIN_VERSION}" "${OLLAMA_VERSION}" | sort -V | head -1)" != "${MIN_VERSION}" ]]; then
+    warn "Ollama ${OLLAMA_VERSION} may be too old. devstral-small-2 requires 0.13.3+"
+fi
 
-TMP_DIR=$(mktemp -d)
-trap 'rm -rf "${TMP_DIR}"' EXIT
+echo "Ollama version: ${OLLAMA_VERSION}"
 
-curl -fsSL "${VLLM_URL}" -o "${TMP_DIR}/${VLLM_TARBALL}"
-tar -xzf "${TMP_DIR}/${VLLM_TARBALL}" -C "${TMP_DIR}"
+# Start Ollama if not running
+if ! pgrep -x "ollama" >/dev/null 2>&1; then
+    echo "starting Ollama server..."
+    ollama serve >/dev/null 2>&1 &
+    sleep 3
+fi
 
-pushd "${TMP_DIR}/vllm-${VLLM_VERSION}" > /dev/null
-uv pip install -r requirements/cpu.txt --index-strategy unsafe-best-match
-uv pip install .
-popd > /dev/null
+# Pull the model
+MODEL="${DEVSTRAL_OLLAMA_MODEL:-devstral-small-2}"
+echo "pulling model ${MODEL} (this may take a while, ~15GB)..."
+ollama pull "${MODEL}"
 
-# Install vllm-metal from our fork (source, not pre-built wheel)
-echo "installing vllm-metal from git (${VLLM_METAL_FORK_REPO}@${VLLM_METAL_FORK_BRANCH})..."
-uv pip install "git+https://github.com/${VLLM_METAL_FORK_REPO}.git@${VLLM_METAL_FORK_BRANCH}"
-
-# Fix torchvision version for torch 2.10.x compatibility
-echo "fixing torchvision version..."
-uv pip install "torchvision>=0.25.0"
-
-# Fix numpy version for numba compatibility (numba needs numpy < 2.3)
-echo "fixing numpy version for numba compatibility..."
-uv pip install "numpy<2.3"
-
-mkdir -p "${HF_HOME_DIR}"
+# Create runtime directories
+mkdir -p "${RUN_DIR}"
 
 cat <<EOF
-OK (macOS + vllm-metal)
-- venv: ${VENV_DIR}
-- HF cache: ${HF_HOME_DIR}
-- GPU: Metal (Apple Silicon)
-- vLLM: ${VLLM_VERSION}
-- vllm-metal: ${VLLM_METAL_FORK_REPO}@${VLLM_METAL_FORK_BRANCH}
+OK (macOS + Ollama)
+- Ollama: ${OLLAMA_VERSION}
+- Model: ${MODEL}
+- Backend: Metal (Apple Silicon)
 
 Next:
-- Start server: scripts/server_start.sh
+1. Start Ollama server: ollama serve
+2. Or use: scripts/server_start.sh (starts Ollama automatically)
+3. Configure Vibe: scripts/vibe_set_local.sh
 EOF
