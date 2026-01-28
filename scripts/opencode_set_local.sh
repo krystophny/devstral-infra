@@ -10,12 +10,12 @@ source "${SCRIPT_DIR}/_common.sh"
 
 platform="$(detect_platform)"
 
-# Default model with 16k context for tool calling
-# OpenCode requires at least 16k context for tools to work
-# 16k balances tool calling with memory usage on 32GB machines
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-glm-4.7-flash-16k}"
+# Default model with 8k context for tool calling
+# OpenCode requires at least 8k context for tools to work
+# 8k balances tool calling with memory usage on 32GB machines
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-glm-4.7-flash-8k}"
 BASE_MODEL="glm-4.7-flash"
-CONTEXT_SIZE=16384
+CONTEXT_SIZE=8192
 
 if [[ "${platform}" == "mac" ]]; then
     API_BASE="${OPENCODE_LOCAL_API_BASE:-http://localhost:11434/v1}"
