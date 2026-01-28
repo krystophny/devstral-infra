@@ -1,9 +1,10 @@
 # devstral-infra
 
-Cross-platform local inference server for Devstral models using vLLM.
+Cross-platform local inference server for Devstral models.
 
-- **Auto-detection**: Automatically selects optimal model, quantization, and context based on hardware
-- **Cross-platform**: macOS (Apple Silicon), Linux (NVIDIA/CPU), Windows (WSL)
+- **Auto-detection**: Automatically selects optimal model and configuration based on hardware
+- **Cross-platform**: macOS (Ollama + Metal), Linux (vLLM + CUDA/CPU), Windows (WSL)
+- **Tool calling**: Full tool use support matching official Mistral setup
 - **Vibe integration**: Configure Vibe to use your local server
 - **Security hardening**: Optional network isolation for Vibe
 
@@ -11,81 +12,46 @@ Cross-platform local inference server for Devstral models using vLLM.
 
 ```bash
 chmod +x scripts/*.sh
-scripts/setup.sh           # Install vLLM (auto-detects platform)
-scripts/detect_hardware.sh # Show recommended configs
+scripts/setup.sh           # Install backend (auto-detects platform)
 scripts/server_start.sh    # Start server
+scripts/vibe_set_local.sh  # Configure Vibe to use local server
 ```
 
-## Supported Hardware
+## Platform Backends
 
-| Platform | GPU | Minimum Memory | Models |
-|----------|-----|----------------|--------|
-| Mac (Apple Silicon) | Metal | 16 GB unified | 24B, 123B |
-| Linux | NVIDIA CUDA | 12 GB VRAM | 24B, 123B |
-| Linux | CPU-only | 24 GB RAM | 24B (slow) |
-| Windows | WSL2 + NVIDIA | 12 GB VRAM | 24B, 123B |
+| Platform | Backend | GPU | Tool Calling | Port |
+|----------|---------|-----|--------------|------|
+| macOS (Apple Silicon) | Ollama | Metal | Yes | 11434 |
+| Linux | vLLM | NVIDIA CUDA | Yes | 8080 |
+| Linux | vLLM | CPU | Yes | 8080 |
+| Windows | WSL + vLLM | NVIDIA | Yes | 8080 |
 
-## Hardware Auto-Detection
+**Why Ollama on macOS?**
+- Official Mistral models use FP8 quantization
+- vllm-metal uses mlx-vlm which doesn't support FP8
+- Ollama's devstral-small-2 has native Metal support and working tool calling
 
-The scripts automatically detect your hardware and select the best configuration.
+## Supported Models
 
-Run `scripts/detect_hardware.sh` to see all viable options:
-
-```
-=== Hardware Detection ===
-platform: mac
-gpu: metal
-vram_mb: 192000
-ram_mb: 256000
-
-=== Viable Configurations ===
-[1] Devstral 2 123B Q4, full 262K context
-    model: mistralai/Devstral-2-123B-Instruct-2512
-    quantization: Q4_K_M
-    max_context: 262144 tokens
-
-[2] Devstral 2 123B Q4, 131K context
-    ...
-
-=== Auto-Selected Configuration ===
-Devstral 2 123B Q4, full 262K context
-```
-
-### Memory Requirements (Q4 quantization)
-
-**Devstral 2 123B:**
-| Context | Memory Required |
-|---------|-----------------|
-| 8K | ~82 GB |
-| 32K | ~90 GB |
-| 131K | ~123 GB |
-| 262K | ~170 GB |
-
-**Devstral Small 24B:**
-| Context | Memory Required |
-|---------|-----------------|
-| 8K | ~16 GB |
-| 32K | ~20 GB |
-| 57K | ~24 GB |
-| 131K | ~35 GB |
-| 262K | ~55 GB |
+| Model | Parameters | Memory (Q4) | Context |
+|-------|------------|-------------|---------|
+| devstral-small-2 | 24B | ~15 GB | 384K |
+| devstral-2 | 123B | ~75 GB | 256K |
 
 ## Commands
 
 ### Setup
 
 ```bash
-scripts/setup.sh  # Auto-detect platform and install vLLM
+scripts/setup.sh  # Auto-detect platform and install backend
 ```
 
 Platform-specific:
 ```bash
-scripts/setup_mac.sh    # macOS with vllm-metal (uses fork for transformers 5.x compat)
-scripts/setup_linux.sh  # Linux with vLLM (CUDA or CPU)
-scripts/setup_wsl.sh    # WSL with vLLM
+scripts/setup_mac.sh    # macOS: Install Ollama + pull model
+scripts/setup_linux.sh  # Linux: Install vLLM (CUDA or CPU)
+scripts/setup_wsl.sh    # WSL: Install vLLM
 ```
-
-**Note (macOS):** We use a [fork of vllm-metal](https://github.com/krystophny/vllm-metal/tree/fix-transformers-5-compat) that upgrades vLLM to 0.14.1 for transformers 5.x compatibility. See [issue #6](https://github.com/krystophny/vllm-metal/issues/6) for details.
 
 ### Server
 
@@ -94,11 +60,20 @@ scripts/server_start.sh  # Start with auto-detected config
 scripts/server_stop.sh   # Stop server
 ```
 
-Override defaults:
+**macOS (Ollama):**
 ```bash
-DEVSTRAL_PORT=9090 scripts/server_start.sh
+# Default model: devstral-small-2
+# Port: 11434
+# API: http://127.0.0.1:11434/v1
+```
+
+**Linux (vLLM):**
+```bash
+# Override model:
 DEVSTRAL_MODEL=mistralai/Devstral-Small-2-24B-Instruct-2512 scripts/server_start.sh
-DEVSTRAL_MAX_MODEL_LEN=32768 scripts/server_start.sh
+
+# Override port:
+DEVSTRAL_PORT=9090 scripts/server_start.sh
 ```
 
 ### Vibe Integration
@@ -108,6 +83,10 @@ scripts/vibe_install.sh     # Install Vibe CLI
 scripts/vibe_set_local.sh   # Configure Vibe to use local server
 scripts/vibe_unset_local.sh # Restore original Vibe config
 ```
+
+The script auto-configures based on platform:
+- **macOS**: Provider `ollama`, port `11434`, model `devstral-small-2`
+- **Linux**: Provider `local`, port `8080`, model `mistralai/Devstral-Small-2-24B-Instruct-2512`
 
 ### Security (Optional)
 
@@ -122,29 +101,19 @@ scripts/security_unharden.sh # Restore Vibe network access
 scripts/teardown.sh  # Remove venv, caches, PID files
 ```
 
-## Environment Variables
-
-### Server Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEVSTRAL_MODEL` | auto | Model ID |
-| `DEVSTRAL_MODEL_SIZE` | auto | `small` (24B) or `full` (123B) |
-| `DEVSTRAL_MAX_MODEL_LEN` | auto | Context length |
-| `DEVSTRAL_HOST` | 127.0.0.1 | Bind address |
-| `DEVSTRAL_PORT` | 8080 | Port |
-
-### Vibe Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VIBE_CONFIG_PATH` | ~/.vibe/config.toml | Config file path |
-| `VIBE_LOCAL_MODEL_ID` | auto | Model ID in Vibe config |
-| `VIBE_LOCAL_PROVIDER_NAME` | local | Provider name |
-| `VIBE_LOCAL_API_BASE` | http://127.0.0.1:8080/v1 | API endpoint |
-
 ## Verify Server
 
+**macOS (Ollama):**
+```bash
+curl -s http://127.0.0.1:11434/v1/models | python -m json.tool
+
+curl -s http://127.0.0.1:11434/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"devstral-small-2","messages":[{"role":"user","content":"Hello"}]}' \
+  | python -m json.tool
+```
+
+**Linux (vLLM):**
 ```bash
 curl -s http://127.0.0.1:8080/v1/models | python -m json.tool
 
@@ -154,27 +123,48 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
   | python -m json.tool
 ```
 
+## Environment Variables
+
+### Server Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEVSTRAL_OLLAMA_MODEL` | devstral-small-2 | Ollama model (macOS) |
+| `DEVSTRAL_MODEL` | auto | vLLM model ID (Linux) |
+| `DEVSTRAL_MAX_MODEL_LEN` | auto | Context length (Linux) |
+| `DEVSTRAL_HOST` | 127.0.0.1 | Bind address |
+| `DEVSTRAL_PORT` | 8080 | Port (Linux only; macOS uses 11434) |
+
+### Vibe Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VIBE_CONFIG_PATH` | ~/.vibe/config.toml | Config file path |
+| `VIBE_LOCAL_MODEL_ID` | auto | Model ID in Vibe config |
+| `VIBE_LOCAL_PROVIDER_NAME` | auto | Provider name (ollama on Mac, local on Linux) |
+| `VIBE_LOCAL_API_BASE` | auto | API endpoint |
+
 ## Architecture
 
 ```
 scripts/
   _common.sh          # Shared utilities, hardware detection
   setup.sh            # Platform dispatcher
-  setup_mac.sh        # macOS setup (vllm-metal)
-  setup_linux.sh      # Linux setup (vLLM CUDA/CPU)
+  setup_mac.sh        # macOS: Ollama + devstral-small-2
+  setup_linux.sh      # Linux: vLLM (CUDA/CPU)
   setup_wsl.sh        # WSL setup
   detect_hardware.sh  # Show hardware and viable configs
-  server_start.sh     # Start vLLM server
+  server_start.sh     # Start server (Ollama or vLLM)
   server_stop.sh      # Stop server
   teardown.sh         # Cleanup
   vibe_install.sh     # Install Vibe CLI
   vibe_set_local.sh   # Configure Vibe for local server
   vibe_unset_local.sh # Restore Vibe config
-  security_harden.sh  # Network isolation (macOS firewall / Linux iptables)
+  security_harden.sh  # Network isolation
   security_unharden.sh
 
 server/
-  run_devstral_server.py  # vLLM launcher
+  run_devstral_server.py  # vLLM launcher (Linux only)
 
 ci/
   mock_server.py          # Pure-stdlib mock for testing

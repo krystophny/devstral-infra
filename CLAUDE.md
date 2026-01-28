@@ -4,16 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-devstral-infra is a cross-platform local inference server for Devstral models using vLLM. It auto-detects hardware and selects optimal model configuration.
+devstral-infra is a cross-platform local inference server for Devstral models.
 
 **Supported models:**
-- Devstral 2 123B (mistralai/Devstral-2-123B-Instruct-2512)
-- Devstral Small 24B (mistralai/Devstral-Small-2-24B-Instruct-2512)
+- devstral-small-2 (24B parameters, ~15GB, 384K context)
+- devstral-2 (123B parameters, ~75GB, 256K context)
 
 **Supported platforms:**
-- macOS (Apple Silicon via vllm-metal)
-- Linux (NVIDIA CUDA or CPU)
-- Windows (WSL2)
+- macOS (Apple Silicon via Ollama + Metal)
+- Linux (vLLM + NVIDIA CUDA or CPU)
+- Windows (WSL2 + vLLM)
+
+**Backend decision:**
+- **macOS uses Ollama** because official Mistral models use FP8 quantization which vllm-metal (mlx-vlm) cannot load. Ollama's devstral-small-2 has native Metal support and working tool calling.
+- **Linux uses vLLM** with the Mistral-recommended flags (`--tokenizer_mode mistral --config_format mistral --load_format mistral`).
 
 ## Commands
 
@@ -21,11 +25,6 @@ devstral-infra is a cross-platform local inference server for Devstral models us
 ```bash
 chmod +x scripts/*.sh ci/*.sh ci/*.py
 scripts/setup.sh
-```
-
-**Show hardware and viable configs:**
-```bash
-scripts/detect_hardware.sh
 ```
 
 **Start server:**
@@ -44,20 +43,9 @@ scripts/vibe_install.sh
 scripts/vibe_set_local.sh
 ```
 
-**Security hardening:**
-```bash
-scripts/security_harden.sh   # Requires sudo
-scripts/security_unharden.sh
-```
-
 **Run tests:**
 ```bash
 bash ci/run_tests.sh
-```
-
-**Cleanup:**
-```bash
-scripts/teardown.sh
 ```
 
 ## Environment Variables
@@ -66,12 +54,11 @@ scripts/teardown.sh
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DEVSTRAL_MODEL` | auto-detected | Full model ID |
-| `DEVSTRAL_MODEL_SIZE` | auto | `small` (24B) or `full` (123B) |
-| `DEVSTRAL_MAX_MODEL_LEN` | auto-detected | Context length |
+| `DEVSTRAL_OLLAMA_MODEL` | devstral-small-2 | Ollama model (macOS) |
+| `DEVSTRAL_MODEL` | auto-detected | vLLM model ID (Linux) |
+| `DEVSTRAL_MAX_MODEL_LEN` | auto-detected | Context length (Linux) |
 | `DEVSTRAL_HOST` | 127.0.0.1 | Bind address |
-| `DEVSTRAL_PORT` | 8080 | Port |
-| `DEVSTRAL_EXTRA_FLAGS` | (empty) | Additional vLLM flags |
+| `DEVSTRAL_PORT` | 8080 | Port (Linux; macOS uses 11434) |
 
 ### Vibe
 
@@ -79,43 +66,35 @@ scripts/teardown.sh
 |----------|---------|-------------|
 | `VIBE_CONFIG_PATH` | ~/.vibe/config.toml | Config file path |
 | `VIBE_LOCAL_MODEL_ID` | auto-detected | Model ID in config |
-| `VIBE_LOCAL_PROVIDER_NAME` | local | Provider name |
-| `VIBE_LOCAL_API_BASE` | http://127.0.0.1:8080/v1 | API endpoint |
+| `VIBE_LOCAL_PROVIDER_NAME` | ollama (Mac) / local (Linux) | Provider name |
+| `VIBE_LOCAL_API_BASE` | auto | API endpoint |
 
 ## Architecture
 
 ```
 scripts/
-  _common.sh          # Core utilities, hardware detection, config mapping
+  _common.sh          # Core utilities, hardware detection
   setup.sh            # Platform dispatcher -> setup_{mac,linux,wsl}.sh
-  setup_mac.sh        # vllm-metal installation
+  setup_mac.sh        # Ollama installation + model pull
   setup_linux.sh      # vLLM pip install (CUDA auto-detect, CPU fallback)
   setup_wsl.sh        # WSL validation + setup_linux.sh
   detect_hardware.sh  # Display hardware info and viable configurations
-  server_start.sh     # Launch vLLM with auto-detected config
-  server_stop.sh      # Graceful shutdown (SIGINT -> SIGTERM)
+  server_start.sh     # Launch Ollama (Mac) or vLLM (Linux)
+  server_stop.sh      # Graceful shutdown
   teardown.sh         # Remove venv, caches, runtime files
   vibe_install.sh     # Install Vibe CLI
   vibe_set_local.sh   # Patch Vibe TOML for local server
   vibe_unset_local.sh # Restore Vibe config from backup
-  security_harden.sh  # Block Vibe network (macOS firewall / Linux iptables)
+  security_harden.sh  # Block Vibe network
   security_unharden.sh
 
 server/
-  run_devstral_server.py  # vLLM launcher with Mistral flags
+  run_devstral_server.py  # vLLM launcher (Linux only)
 
 ci/
   mock_server.py          # Pure-stdlib mock OpenAI server
   run_tests.sh            # Test suite runner
-  test_setup.sh           # Platform detection, config tests
-  test_hardware_detect.sh # Hardware -> config mapping tests
-  test_vibe_config.sh     # TOML patching tests
-  test_security.sh        # Security setting tests
-  test_server_health.sh   # Mock server endpoint tests
-  test_server_inference.sh # Real inference with Ministral 3B (CI_SMOKE_TEST=1)
-
-.github/workflows/
-  ci.yml              # lint, test-linux, test-macos, test-wsl, smoke-linux
+  test_*.sh               # Test suites
 ```
 
 ## Key Functions in _common.sh
@@ -128,59 +107,29 @@ ci/
 - `list_viable_configs()` - All configs that fit in available memory
 - `best_config()` - Top recommendation
 - `auto_config()` - Full config string: model|context|extra_flags
-- `model_memory_requirements()` - Memory needed for model+quantization
-- `context_memory_overhead()` - Additional memory for context
 
-## Hardware-to-Config Mapping
+## API Endpoints
 
-The system maps available memory to optimal configurations:
+**macOS (Ollama):**
+- Base URL: `http://127.0.0.1:11434/v1`
+- Model name: `devstral-small-2`
+- Tool calling: Yes (native support)
 
-**Mac (unified memory, 75% usable for GPU):**
-| Memory | Model | Context |
-|--------|-------|---------|
-| >= 170 GB | 123B | 262K |
-| >= 123 GB | 123B | 131K |
-| >= 82 GB | 123B | 32K |
-| >= 55 GB | 24B | 262K |
-| >= 35 GB | 24B | 131K |
-| >= 24 GB | 24B | 57K |
-| >= 20 GB | 24B | 32K |
-| >= 16 GB | 24B | 8K |
-
-**NVIDIA (VRAM):**
-| VRAM | Model | Context | Notes |
-|------|-------|---------|-------|
-| >= 96 GB | 123B | 32K | Multi-GPU (4x24GB) |
-| >= 48 GB | 24B | 262K | |
-| >= 24 GB | 24B | 57K | |
-| >= 16 GB | 24B | 32K | |
-| >= 12 GB | 24B | 8K | |
+**Linux (vLLM):**
+- Base URL: `http://127.0.0.1:8080/v1`
+- Model name: `mistralai/Devstral-Small-2-24B-Instruct-2512`
+- Tool calling: Yes (`--enable-auto-tool-choice --tool-call-parser mistral`)
 
 ## Runtime Directories
 
-- `.venv/` - Python virtual environment
-- `.hf/` - HuggingFace model cache (`HF_HOME`)
+- `.venv/` - Python virtual environment (Linux only)
+- `.hf/` - HuggingFace model cache (Linux only)
 - `.run/` - PID file, port file, server logs
 
 ## Key Constraints
 
-- macOS requires Python 3.12 (vllm-metal wheel compatibility)
-- Linux accepts Python 3.11+
+- macOS requires Ollama 0.13.3+ for devstral-small-2
+- Linux requires Python 3.11+ for vLLM
 - Vibe TOML manipulation uses regex (not full TOML parser)
 - Graceful shutdown has 30-second timeout before SIGTERM
-- Multi-GPU uses `--tensor-parallel-size` (auto-detected)
-
-## vllm-metal Fork (macOS)
-
-On macOS, we use a fork of vllm-metal that upgrades vLLM from 0.13.0 to 0.14.1 for transformers 5.x compatibility.
-
-- **Fork**: https://github.com/krystophny/vllm-metal
-- **Branch**: `fix-transformers-5-compat`
-- **Issue**: https://github.com/krystophny/vllm-metal/issues/6
-
-The upstream vllm-metal hardcodes vLLM 0.13.0, which is incompatible with transformers >= 5.0 due to a renamed constant (`ALLOWED_LAYER_TYPES` -> `ALLOWED_MLP_LAYER_TYPES`). The fix was merged in vLLM 0.14.0 (PR vllm-project/vllm#31146).
-
-**Override fork settings:**
-```bash
-VLLM_METAL_FORK_REPO=krystophny/vllm-metal VLLM_METAL_FORK_BRANCH=fix-transformers-5-compat scripts/setup.sh
-```
+- Multi-GPU (Linux) uses `--tensor-parallel-size` (auto-detected)
