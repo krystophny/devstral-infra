@@ -11,7 +11,7 @@ VLLM_METAL_VENV="${HOME}/.venv-vllm-metal"
 
 # Use our fork with vLLM 0.14.1 for transformers 5.x compatibility
 # See: https://github.com/krystophny/vllm-metal/issues/6
-VLLM_METAL_FORK_BRANCH="${VLLM_METAL_FORK_BRANCH:-fix-transformers-5-compat}"
+VLLM_METAL_FORK_BRANCH="${VLLM_METAL_FORK_BRANCH:-main}"
 VLLM_METAL_FORK_REPO="${VLLM_METAL_FORK_REPO:-krystophny/vllm-metal}"
 
 echo "installing vllm-metal from fork (${VLLM_METAL_FORK_REPO}@${VLLM_METAL_FORK_BRANCH})..."
