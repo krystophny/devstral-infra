@@ -8,12 +8,12 @@ devstral-infra is a cross-platform local inference server for coding AI models.
 
 **Supported models:**
 - devstral-small-2 (24B parameters, ~15GB, 384K context) - for Vibe
-- glm-4.7-flash (30B total / 3B active MoE, ~19GB, 198K context) - for OpenCode
+- gpt-oss:20b (20B MoE, ~14GB, 128K context) - for OpenCode
 - devstral-2 (123B parameters, ~75GB, 256K context) - Linux only
 
 **Supported clients:**
 - Mistral Vibe CLI - works with devstral-small-2
-- OpenCode CLI - works with glm-4.7-flash (officially recommended by Ollama)
+- OpenCode CLI - works with gpt-oss:20b (good tool calling, efficient memory)
 
 **Supported platforms:**
 - macOS (Apple Silicon via Ollama + Metal)
@@ -56,7 +56,7 @@ scripts/vibe_set_local.sh
 **Configure OpenCode (recommended for tool calling):**
 ```bash
 scripts/opencode_install.sh
-scripts/opencode_set_local.sh  # Creates glm-4.7-flash-8k automatically
+scripts/opencode_set_local.sh  # Creates gpt-oss-20b-16k automatically
 ```
 
 **Security hardening (block network access):**
@@ -96,7 +96,7 @@ bash ci/run_tests.sh
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCODE_CONFIG_PATH` | ~/.config/opencode/opencode.json | Config file path |
-| `OPENCODE_LOCAL_MODEL_ID` | glm-4.7-flash-8k | Model ID (8k context for tool calling) |
+| `OPENCODE_LOCAL_MODEL_ID` | gpt-oss-20b-16k | Model ID (16k context for tool calling) |
 | `OPENCODE_LOCAL_API_BASE` | http://localhost:11434/v1 | API endpoint |
 
 ## Architecture
@@ -145,7 +145,7 @@ ci/
 
 **macOS (Ollama):**
 - Base URL: `http://127.0.0.1:11434/v1`
-- Models: `devstral-small-2`, `glm-4.7-flash`
+- Models: `devstral-small-2`, `gpt-oss:20b`
 - Tool calling: Yes (native support)
 
 **Linux (vLLM):**
@@ -157,14 +157,14 @@ ci/
 
 | Use Case | Model | Size | Why |
 |----------|-------|------|-----|
-| OpenCode (tool calling) | glm-4.7-flash-8k | 19GB + 5GB KV | 8k context required for tool calling |
+| OpenCode (tool calling) | gpt-oss-20b-16k | 14GB | Efficient MoE, good tool calling |
 | Vibe (Mistral native) | devstral-small-2 | 15GB | Native Mistral tool calling format |
 | Linux NVIDIA | devstral-small-2 | 24GB | Full quality via vLLM |
 
 **Important:** OpenCode requires 8k-64k context for tool calling to work. The default Ollama 4k context causes tools to fail with "invalid tool" errors.
 
 **Performance on Apple Silicon (32GB):**
-- GLM-4.7-Flash-8k: 30-50 tok/s (8k context uses ~5GB extra for KV cache)
+- GPT-OSS-20b-16k: ~14GB model + ~3GB KV cache, leaves headroom for system
 - Devstral-small-2: 40-60 tok/s with default context
 
 ## Runtime Directories
@@ -175,9 +175,9 @@ ci/
 
 ## Key Constraints
 
-- macOS requires Ollama 0.14.3+ for glm-4.7-flash-8k, 0.13.3+ for devstral-small-2
+- macOS requires Ollama 0.13.3+ for devstral-small-2, gpt-oss:20b
 - Linux requires Python 3.11+ for vLLM
-- OpenCode requires 64K+ context for best tool calling
+- OpenCode requires 8k+ context for tool calling (16k recommended)
 - Graceful shutdown has 30-second timeout before SIGTERM
 - Multi-GPU (Linux) uses `--tensor-parallel-size` (auto-detected)
 
@@ -193,6 +193,6 @@ After hardening, applications can only connect to localhost (local Ollama server
 **Important:** Pull all required models BEFORE running security_harden.sh:
 ```bash
 ollama pull devstral-small-2
-ollama pull glm-4.7-flash
+ollama pull gpt-oss:20b
 scripts/security_harden.sh
 ```
