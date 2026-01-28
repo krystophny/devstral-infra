@@ -54,6 +54,7 @@ fi
 cat > "${CONFIG_PATH}" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
+  "model": "ollama/${MODEL_ID}",
   "share": "disabled",
   "autoupdate": false,
   "experimental": {
