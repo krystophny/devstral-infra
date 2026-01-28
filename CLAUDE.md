@@ -169,3 +169,18 @@ The system maps available memory to optimal configurations:
 - Vibe TOML manipulation uses regex (not full TOML parser)
 - Graceful shutdown has 30-second timeout before SIGTERM
 - Multi-GPU uses `--tensor-parallel-size` (auto-detected)
+
+## vllm-metal Fork (macOS)
+
+On macOS, we use a fork of vllm-metal that upgrades vLLM from 0.13.0 to 0.14.1 for transformers 5.x compatibility.
+
+- **Fork**: https://github.com/krystophny/vllm-metal
+- **Branch**: `fix-transformers-5-compat`
+- **Issue**: https://github.com/krystophny/vllm-metal/issues/6
+
+The upstream vllm-metal hardcodes vLLM 0.13.0, which is incompatible with transformers >= 5.0 due to a renamed constant (`ALLOWED_LAYER_TYPES` -> `ALLOWED_MLP_LAYER_TYPES`). The fix was merged in vLLM 0.14.0 (PR vllm-project/vllm#31146).
+
+**Override fork settings:**
+```bash
+VLLM_METAL_FORK_REPO=krystophny/vllm-metal VLLM_METAL_FORK_BRANCH=fix-transformers-5-compat scripts/setup.sh
+```
