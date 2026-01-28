@@ -81,7 +81,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .hf/ministral-3b.gguf
-          key: ministral-3b-q4km-v1
+          key: ministral-3b-q4km-v2
       - name: Install CI dependencies
         run: |
           pip install --upgrade pip
