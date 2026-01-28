@@ -80,10 +80,12 @@ scripts/setup.sh  # Auto-detect platform and install vLLM
 
 Platform-specific:
 ```bash
-scripts/setup_mac.sh    # macOS with vllm-metal
+scripts/setup_mac.sh    # macOS with vllm-metal (uses fork for transformers 5.x compat)
 scripts/setup_linux.sh  # Linux with vLLM (CUDA or CPU)
 scripts/setup_wsl.sh    # WSL with vLLM
 ```
+
+**Note (macOS):** We use a [fork of vllm-metal](https://github.com/krystophny/vllm-metal/tree/fix-transformers-5-compat) that upgrades vLLM to 0.14.1 for transformers 5.x compatibility. See [issue #6](https://github.com/krystophny/vllm-metal/issues/6) for details.
 
 ### Server
 
