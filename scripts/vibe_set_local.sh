@@ -191,6 +191,7 @@ def ensure_local_model(lines_in: list[str]) -> list[str]:
 
 lines = set_top_level_key(lines, "active_model", "local")
 lines = set_top_level_bool(lines, "enable_auto_update", False)
+lines = set_top_level_bool(lines, "enable_update_checks", False)
 lines = set_top_level_int(lines, "auto_compact_threshold", 200000)
 lines = ensure_provider(lines)
 lines = ensure_local_model(lines)
@@ -207,4 +208,5 @@ echo "- provider: ${PROVIDER_NAME}"
 echo "- api_base: ${API_BASE}"
 echo "- model: ${MODEL_ID}"
 echo "- enable_auto_update: false"
+echo "- enable_update_checks: false"
 echo "backup (first run): ${BACKUP_PATH}"
