@@ -34,6 +34,7 @@ MAX_MODEL_LEN="$(echo "${config}" | cut -d'|' -f2)"
 EXTRA_FLAGS="$(echo "${config}" | cut -d'|' -f3)"
 
 export HF_HOME="${HF_HOME_DIR}"
+export VLLM_HOST_IP="127.0.0.1"
 export DEVSTRAL_MODEL="${MODEL}"
 export DEVSTRAL_HOST="${HOST}"
 export DEVSTRAL_PORT="${PORT}"
