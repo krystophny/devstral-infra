@@ -45,6 +45,10 @@ uv pip install "git+https://github.com/${VLLM_METAL_FORK_REPO}.git@${VLLM_METAL_
 echo "fixing torchvision version..."
 uv pip install "torchvision>=0.25.0"
 
+# Fix numpy version for numba compatibility (numba needs numpy < 2.3)
+echo "fixing numpy version for numba compatibility..."
+uv pip install "numpy<2.3"
+
 mkdir -p "${HF_HOME_DIR}"
 
 cat <<EOF
