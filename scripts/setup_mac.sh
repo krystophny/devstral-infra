@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/_common.sh"
 [[ "$(detect_platform)" == "mac" ]] || die "setup_mac.sh must run on macOS"
 
 # macOS uses Ollama (native Metal support, tool calling works)
-# Default to GLM-4.7-Flash with 32k context for OpenCode compatibility
+# Default to GLM-4.7-Flash with 16k context for OpenCode compatibility
 
 echo "=== Setting up Ollama on macOS ==="
 
@@ -38,16 +38,16 @@ if ! pgrep -x "ollama" >/dev/null 2>&1; then
     sleep 3
 fi
 
-# Pull and configure model with 32k context for tool calling
+# Pull and configure model with 16k context for tool calling
 BASE_MODEL="${DEVSTRAL_OLLAMA_BASE_MODEL:-glm-4.7-flash}"
-MODEL="${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-32k}"
-CONTEXT_SIZE=32768
+MODEL="${DEVSTRAL_OLLAMA_MODEL:-glm-4.7-flash-16k}"
+CONTEXT_SIZE=16384
 
 echo "pulling base model ${BASE_MODEL} (~19GB)..."
 ollama pull "${BASE_MODEL}"
 
-# Create 32k context variant if needed
-if [[ "${MODEL}" == *"-32k" ]] && ! ollama list 2>/dev/null | grep -q "^${MODEL}"; then
+# Create 16k context variant if needed
+if [[ "${MODEL}" == *"-16k" ]] && ! ollama list 2>/dev/null | grep -q "^${MODEL}"; then
     echo "Creating ${MODEL} with ${CONTEXT_SIZE} context..."
     cat > /tmp/Modelfile-setup <<EOF
 FROM ${BASE_MODEL}
