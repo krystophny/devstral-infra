@@ -1,0 +1,4 @@
+# Ensure shell scripts always use LF line endings
+# This is critical for WSL testing in CI
+*.sh text eol=lf
+*.py text eol=lf
