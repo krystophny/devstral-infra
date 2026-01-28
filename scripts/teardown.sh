@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
-if [[ -f "$(server_pid_file)" ]]; then
+if [[ -f "$(server_pid_file)" ]] || [[ -f "$(legacy_pid_file)" ]]; then
   "${SCRIPT_DIR}/server_stop.sh" || true
 fi
 

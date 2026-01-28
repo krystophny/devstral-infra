@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
+migrate_legacy_pid
+
 PID_FILE="$(server_pid_file)"
 PORT_FILE="$(server_port_file)"
 
