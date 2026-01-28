@@ -30,6 +30,7 @@ if have vibe; then
   vibe --version 2>/dev/null || true
 else
   echo "Vibe installed but not in PATH. Add ~/.vibe/bin to your PATH:"
+  # shellcheck disable=SC2016  # intentionally literal $HOME for user to copy
   echo '  export PATH="$HOME/.vibe/bin:$PATH"'
 fi
 

@@ -3,9 +3,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="${REPO_ROOT}/.run"
+# shellcheck disable=SC2034  # used by scripts that source this file
 HF_HOME_DIR="${REPO_ROOT}/.hf"
 VENV_DIR="${REPO_ROOT}/.venv"
-CONFIG_FILE="${RUN_DIR}/devstral.conf"
 
 mkdir -p "${RUN_DIR}"
 
@@ -417,7 +417,7 @@ ensure_python_venv() {
 }
 
 activate_venv() {
-  # shellcheck disable=SC1090
+  # shellcheck disable=SC1090,SC1091
   source "${VENV_DIR}/bin/activate"
 }
 
