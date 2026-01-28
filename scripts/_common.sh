@@ -392,13 +392,8 @@ ensure_python_venv() {
 
   case "${platform}" in
     mac)
-      if have python3.12; then
-        python3.12 -m venv "${VENV_DIR}"
-      elif have /opt/homebrew/bin/python3.12; then
-        /opt/homebrew/bin/python3.12 -m venv "${VENV_DIR}"
-      else
-        die "python3.12 not found (required for vllm-metal on macOS). Install via: brew install python@3.12"
-      fi
+      # macOS uses Ollama, not vLLM. This function should not be called on Mac.
+      die "ensure_python_venv should not be called on macOS. Use Ollama instead."
       ;;
     linux|wsl)
       local py=""
