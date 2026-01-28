@@ -16,8 +16,13 @@ devstral-infra is a cross-platform local inference server for Devstral models.
 - Windows (WSL2 + vLLM)
 
 **Backend decision:**
-- **macOS uses Ollama** because official Mistral models use FP8 quantization which vllm-metal (mlx-vlm) cannot load. Ollama's devstral-small-2 has native Metal support and working tool calling.
+- **macOS uses Ollama** because official Mistral models use FP8 quantization which Apple Silicon cannot accelerate (FP8 requires NVIDIA tensor cores). Ollama's devstral-small-2 uses Q4_K_M quantization with native Metal support.
 - **Linux uses vLLM** with the Mistral-recommended flags (`--tokenizer_mode mistral --config_format mistral --load_format mistral`).
+
+**Known limitations (macOS):**
+- Ollama/llama.cpp Devstral quality may be lower than vLLM on NVIDIA - Mistral recommends API if issues occur
+- No official Mistral documentation for self-hosted Vibe on Mac
+- Vibe config based on community guide: https://dev.to/chung_duy_51a346946b27a3d/running-mistral-vibe-with-local-llms-a-complete-guide-1mde
 
 ## Commands
 
@@ -82,8 +87,8 @@ scripts/
   server_start.sh     # Launch Ollama (Mac) or vLLM (Linux)
   server_stop.sh      # Graceful shutdown
   teardown.sh         # Remove venv, caches, runtime files
-  vibe_install.sh     # Install Vibe CLI
-  vibe_set_local.sh   # Patch Vibe TOML for local server
+  vibe_install.sh     # Install Vibe CLI (from mistral.ai)
+  vibe_set_local.sh   # Generate complete Vibe config.toml for local Ollama
   vibe_unset_local.sh # Restore Vibe config from backup
   security_harden.sh  # Block Vibe network
   security_unharden.sh
