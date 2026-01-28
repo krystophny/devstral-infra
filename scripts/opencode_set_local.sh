@@ -18,6 +18,9 @@ else
     API_BASE="${OPENCODE_LOCAL_API_BASE:-http://127.0.0.1:11434/v1}"
 fi
 
+# Alternative models supported
+ALT_MODELS="qwen3-coder:30b devstral-small-2"
+
 # OpenCode config locations (in priority order)
 # 1. ./.opencode.json (local directory)
 # 2. $XDG_CONFIG_HOME/opencode/.opencode.json
@@ -56,6 +59,9 @@ cat > "${CONFIG_PATH}" <<EOF
       "models": {
         "${MODEL_ID}": {
           "name": "GLM 4.7 Flash (local)"
+        },
+        "qwen3-coder:30b": {
+          "name": "Qwen3 Coder 30B (local)"
         },
         "devstral-small-2": {
           "name": "Devstral Small 2 (local)"
