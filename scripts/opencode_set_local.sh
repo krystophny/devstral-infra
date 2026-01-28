@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure OpenCode for local Ollama server with GLM-4.7-Flash (32k context)
+# Configure OpenCode for local Ollama server with GPT-OSS 20B (16k context)
 # Reference: https://opencode.ai/docs/providers
 # Reference: https://docs.ollama.com/integrations/opencode
 set -euo pipefail
@@ -10,12 +10,13 @@ source "${SCRIPT_DIR}/_common.sh"
 
 platform="$(detect_platform)"
 
-# Default model with 8k context for tool calling
+# Default model with 16k context for tool calling
 # OpenCode requires at least 8k context for tools to work
-# 8k balances tool calling with memory usage on 32GB machines
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-glm-4.7-flash-8k}"
-BASE_MODEL="glm-4.7-flash"
-CONTEXT_SIZE=8192
+# 16k provides good tool calling with reasonable memory on 32GB machines
+# GPT-OSS 20B: 14GB model, 128K native context, MoE architecture
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-gpt-oss-20b-16k}"
+BASE_MODEL="gpt-oss:20b"
+CONTEXT_SIZE=16384
 
 if [[ "${platform}" == "mac" ]]; then
     API_BASE="${OPENCODE_LOCAL_API_BASE:-http://localhost:11434/v1}"
@@ -23,10 +24,10 @@ else
     API_BASE="${OPENCODE_LOCAL_API_BASE:-http://127.0.0.1:11434/v1}"
 fi
 
-# Create 32k context variant if it doesn't exist
+# Create 16k context variant if it doesn't exist
 if ! ollama list 2>/dev/null | grep -q "${MODEL_ID}"; then
     echo "Creating ${MODEL_ID} with ${CONTEXT_SIZE} context..."
-    if ! ollama list 2>/dev/null | grep -q "${BASE_MODEL}"; then
+    if ! ollama list 2>/dev/null | grep -q "gpt-oss"; then
         echo "Pulling base model ${BASE_MODEL}..."
         ollama pull "${BASE_MODEL}"
     fi
@@ -74,7 +75,7 @@ cat > "${CONFIG_PATH}" <<EOF
       },
       "models": {
         "${MODEL_ID}": {
-          "name": "GLM 4.7 Flash 32k (local)"
+          "name": "GPT-OSS 20B 16k (local)"
         }
       }
     }
