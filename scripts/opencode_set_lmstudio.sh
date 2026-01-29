@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 
 LMSTUDIO_PORT="${LMSTUDIO_PORT:-1234}"
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-gpt-oss-120b}"
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-Devstral-Small-2-24B-Instruct-2512-Q3_K_L}"
 API_BASE="http://127.0.0.1:${LMSTUDIO_PORT}/v1"
 
 CONFIG_PATH="${OPENCODE_CONFIG_PATH:-${HOME}/.config/opencode/opencode.json}"
@@ -33,7 +33,7 @@ cat > "${CONFIG_PATH}" << JSON
       },
       "models": {
         "${MODEL_ID}": {
-          "name": "GPT-OSS 120B",
+          "name": "Devstral Small 2 32K",
           "limit": {
             "context": 32000,
             "output": 8192
