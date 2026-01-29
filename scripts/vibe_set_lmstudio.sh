@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 
 LMSTUDIO_PORT="${LMSTUDIO_PORT:-1234}"
-MODEL_ID="${VIBE_LOCAL_MODEL_ID:-Devstral-2-123B-Instruct-2512-Q4_K_S}"
+MODEL_ID="${VIBE_LOCAL_MODEL_ID:-Devstral-Small-2-24B-Instruct-2512-Q3_K_L}"
 API_BASE="http://127.0.0.1:${LMSTUDIO_PORT}/v1"
 
 CONFIG_PATH="${VIBE_CONFIG_PATH:-${HOME}/.vibe/config.toml}"
