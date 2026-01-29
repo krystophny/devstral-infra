@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure OpenCode for LM Studio with GLM-4.7-Flash (16k context, MLA enabled)
+# Configure OpenCode for LM Studio with GPT-OSS 20B (default) or GLM-4.7-Flash
 # Reference: https://lmstudio.ai/docs/cli
 # Reference: https://opencode.ai/docs/providers
 set -euo pipefail
@@ -11,39 +11,44 @@ source "${SCRIPT_DIR}/_common.sh"
 platform="$(detect_platform)"
 
 if [[ "${platform}" != "mac" ]]; then
-    echo "Error: LM Studio MLX backend only works on macOS"
+    echo "Error: LM Studio only works on macOS in this setup"
     exit 1
 fi
 
-# Model settings
-MODEL_HF="lmstudio-community/GLM-4.7-Flash-MLX-4bit"
-MODEL_ID="glm-4.7-flash-mlx-4bit"
+# Model settings - default to GPT-OSS 20B (efficient everywhere, 128k context)
+# For GLM-4.7-Flash: LMSTUDIO_MODEL_HF=zai-org/GLM-4.7-Flash LMSTUDIO_MODEL_ID=glm-4.7-flash
+MODEL_HF="${LMSTUDIO_MODEL_HF:-openai/gpt-oss-20b}"
+MODEL_ID="${LMSTUDIO_MODEL_ID:-gpt-oss-20b}"
+MODEL_NAME="${LMSTUDIO_MODEL_NAME:-GPT-OSS 20B 16k (local)}"
 CONTEXT_SIZE="${LMSTUDIO_CONTEXT_SIZE:-16384}"
 API_BASE="${LMSTUDIO_API_BASE:-http://localhost:1234/v1}"
 
-# Check lms CLI
-if ! command -v lms &>/dev/null; then
-    echo "Error: lms CLI not found. Run scripts/lmstudio_install.sh first"
+# Use bundled lms CLI (more reliable than npx version)
+LMS="/Applications/LM Studio.app/Contents/Resources/app/.webpack/lms"
+if [[ ! -x "${LMS}" ]]; then
+    echo "Error: LM Studio not found. Install with: brew install --cask lm-studio"
     exit 1
 fi
 
-# Download model if not present
-if ! lms ls 2>/dev/null | grep -qi "glm-4.7-flash"; then
-    echo "Downloading ${MODEL_HF}..."
-    lms get "${MODEL_HF}"
+# Check if model exists locally
+if ! "${LMS}" ls 2>/dev/null | grep -qi "${MODEL_ID}"; then
+    echo "Model ${MODEL_ID} not found locally."
+    echo "Please download it in LM Studio GUI or run:"
+    echo "  ${LMS} get ${MODEL_HF}"
+    exit 1
 fi
 
-# Start server if not running
+# Start LM Studio app if not running
 if ! curl -s "${API_BASE}/models" &>/dev/null; then
-    echo "Starting LM Studio server..."
-    lms server start
-    sleep 3
+    echo "Starting LM Studio..."
+    open -a "LM Studio"
+    sleep 5
 fi
 
-# Load model with context size
+# Unload all models and load with proper context and identifier
 echo "Loading ${MODEL_ID} with ${CONTEXT_SIZE} context..."
-lms unload --all 2>/dev/null || true
-lms load "${MODEL_ID}" --gpu max -c "${CONTEXT_SIZE}"
+"${LMS}" unload --all 2>/dev/null || true
+"${LMS}" load "${MODEL_HF}" --gpu max -c "${CONTEXT_SIZE}" --identifier "${MODEL_ID}"
 
 # OpenCode config
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
@@ -79,7 +84,7 @@ cat > "${CONFIG_PATH}" <<EOF
       },
       "models": {
         "${MODEL_ID}": {
-          "name": "GLM-4.7-Flash MLX 4bit (local)"
+          "name": "${MODEL_NAME}"
         }
       }
     }
@@ -93,7 +98,6 @@ echo "- config: ${CONFIG_PATH}"
 echo "- model: ${MODEL_ID}"
 echo "- context: ${CONTEXT_SIZE} tokens"
 echo "- api_base: ${API_BASE}"
-echo "- MLA: enabled (efficient KV cache)"
 echo ""
 echo "Usage:"
 echo "  opencode"
