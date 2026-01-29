@@ -44,10 +44,20 @@ if [[ -f "${SQUASHFS_DIR}/chrome-sandbox" ]]; then
     echo "Run: sudo chown root:root ${SQUASHFS_DIR}/chrome-sandbox && sudo chmod 4755 ${SQUASHFS_DIR}/chrome-sandbox"
 fi
 
-# Link lms CLI
-if [[ -f "${SQUASHFS_DIR}/resources/bin/lms" ]]; then
-    ln -sf "${SQUASHFS_DIR}/resources/bin/lms" "${HOME}/.local/bin/lms"
-    echo "lms CLI linked to ~/.local/bin/lms"
+# Link lms CLI (may be at different paths depending on version)
+LMS_PATH=""
+for path in "${SQUASHFS_DIR}/resources/app/.webpack/lms" "${SQUASHFS_DIR}/resources/bin/lms" "${HOME}/.lmstudio/bin/lms"; do
+    if [[ -f "${path}" ]]; then
+        LMS_PATH="${path}"
+        break
+    fi
+done
+
+if [[ -n "${LMS_PATH}" ]]; then
+    ln -sf "${LMS_PATH}" "${HOME}/.local/bin/lms"
+    echo "lms CLI linked to ~/.local/bin/lms (from ${LMS_PATH})"
+else
+    echo "Note: lms CLI will be available after first LM Studio launch"
 fi
 
 # Create desktop entry
