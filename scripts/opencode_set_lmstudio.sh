@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 
 LMSTUDIO_PORT="${LMSTUDIO_PORT:-1234}"
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-gpt-oss-20b}"
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-gpt-oss-120b}"
 API_BASE="http://127.0.0.1:${LMSTUDIO_PORT}/v1"
 
 CONFIG_PATH="${OPENCODE_CONFIG_PATH:-${HOME}/.config/opencode/opencode.json}"
@@ -19,24 +19,30 @@ if [[ -f "${CONFIG_PATH}" && ! -f "${BACKUP_PATH}" ]]; then
     echo "backup: ${BACKUP_PATH}"
 fi
 
-# Generate config for LM Studio
+# Generate config for LM Studio (correct OpenCode schema)
 cat > "${CONFIG_PATH}" << JSON
 {
-  "model": "lmstudio/${MODEL_ID}",
+  "\$schema": "https://opencode.ai/config.json",
   "provider": {
     "lmstudio": {
-      "name": "LM Studio",
-      "kind": "openai",
-      "baseURL": "${API_BASE}",
-      "apiKey": "lm-studio"
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LM Studio (Local)",
+      "options": {
+        "baseURL": "${API_BASE}",
+        "apiKey": "lm-studio"
+      },
+      "models": {
+        "${MODEL_ID}": {
+          "name": "GPT-OSS 120B",
+          "limit": {
+            "context": 32000,
+            "output": 8192
+          }
+        }
+      }
     }
   },
-  "autoupdate": {
-    "enabled": false
-  },
-  "telemetry": {
-    "enabled": false
-  }
+  "model": "lmstudio/${MODEL_ID}"
 }
 JSON
 
