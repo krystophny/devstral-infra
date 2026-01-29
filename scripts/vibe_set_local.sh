@@ -14,9 +14,16 @@ if [[ "${platform}" == "mac" ]]; then
     PROVIDER_NAME="${VIBE_LOCAL_PROVIDER_NAME:-ollama}"
     API_BASE="${VIBE_LOCAL_API_BASE:-http://localhost:11434/v1}"
 else
-    MODEL_ID="${VIBE_LOCAL_MODEL_ID:-$(default_model 2>/dev/null || echo "mistralai/Devstral-Small-2-24B-Instruct-2512")}"
-    PROVIDER_NAME="${VIBE_LOCAL_PROVIDER_NAME:-local}"
-    API_BASE="${VIBE_LOCAL_API_BASE:-http://127.0.0.1:8080/v1}"
+    # Check if Ollama is running, otherwise assume vLLM
+    if pgrep -x ollama >/dev/null 2>&1; then
+        MODEL_ID="${VIBE_LOCAL_MODEL_ID:-devstral-small-2}"
+        PROVIDER_NAME="${VIBE_LOCAL_PROVIDER_NAME:-ollama}"
+        API_BASE="${VIBE_LOCAL_API_BASE:-http://127.0.0.1:11434/v1}"
+    else
+        MODEL_ID="${VIBE_LOCAL_MODEL_ID:-$(default_model 2>/dev/null || echo "mistralai/Devstral-Small-2-24B-Instruct-2512")}"
+        PROVIDER_NAME="${VIBE_LOCAL_PROVIDER_NAME:-local}"
+        API_BASE="${VIBE_LOCAL_API_BASE:-http://127.0.0.1:8080/v1}"
+    fi
 fi
 
 CONFIG_PATH="${VIBE_CONFIG_PATH:-${HOME}/.vibe/config.toml}"
