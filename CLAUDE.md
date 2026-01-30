@@ -7,61 +7,57 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 devstral-infra is a cross-platform local inference server for coding AI models.
 
 **Supported models:**
-- devstral-small-2 (24B parameters, ~15GB, 384K context) - for Vibe
-- gpt-oss:20b (20B MoE, ~14GB, 128K context) - for OpenCode
-- devstral-2 (123B parameters, ~75GB, 256K context) - Linux only
+- devstral-small-2 (24B parameters, ~15GB, 32K context) - for Vibe and OpenCode
+- GLM-4.7-REAP-50 (47B parameters, ~30GB, 32K context) - for OpenCode (reasoning)
+- devstral-2 (123B parameters, ~75GB, 32K context) - high-end hardware
 
 **Supported clients:**
 - Mistral Vibe CLI - works with devstral-small-2
-- OpenCode CLI - works with gpt-oss:20b (good tool calling, efficient memory)
+- OpenCode CLI - works with devstral-small-2 or GLM-4.7
 
 **Supported platforms:**
-- macOS (Apple Silicon via Ollama + Metal)
-- Linux (vLLM + NVIDIA CUDA or CPU)
-- Windows (WSL2 + vLLM)
+- macOS (Apple Silicon via LM Studio + MLX)
+- Linux (LM Studio or vLLM + NVIDIA CUDA/CPU)
+- Windows (WSL2 + LM Studio)
 
 **Backend decision:**
-- **macOS uses Ollama** because official Mistral models use FP8 quantization which Apple Silicon cannot accelerate (FP8 requires NVIDIA tensor cores). Ollama models use Q4_K_M quantization with native Metal support.
-- **Linux uses vLLM** with the Mistral-recommended flags (`--tokenizer_mode mistral --config_format mistral --load_format mistral`).
-
-**Known limitations (macOS):**
-- Ollama/llama.cpp Devstral quality may be lower than vLLM on NVIDIA - Mistral recommends API if issues occur
-- No official Mistral documentation for self-hosted Vibe on Mac
-- Vibe config based on community guide: https://dev.to/chung_duy_51a346946b27a3d/running-mistral-vibe-with-local-llms-a-complete-guide-1mde
+- **macOS uses LM Studio** with MLX backend for native Apple Silicon acceleration. Models use 4-bit quantization.
+- **Linux uses LM Studio** or **vLLM** with the Mistral-recommended flags (`--tokenizer_mode mistral --config_format mistral --load_format mistral`).
 
 ## Commands
 
-**Setup** (auto-detects platform):
+**Setup (LM Studio - recommended):**
 ```bash
 chmod +x scripts/*.sh ci/*.sh ci/*.py
-scripts/setup.sh
+scripts/lmstudio_install.sh       # Install LM Studio + lms CLI
+scripts/lmstudio_server_start.sh  # Start API server
 ```
 
-**Start server:**
+**Configure Vibe:**
 ```bash
-scripts/server_start.sh
+scripts/vibe_install.sh
+scripts/vibe_set_lmstudio.sh
+```
+
+**Configure OpenCode:**
+```bash
+scripts/opencode_install.sh
+scripts/opencode_set_lmstudio.sh
+```
+
+**One-command setup (GLM-4.7 + OpenCode):**
+```bash
+scripts/lmstudio_set_local.sh  # Downloads model, starts server, configures OpenCode
 ```
 
 **Stop server:**
 ```bash
-scripts/server_stop.sh
-```
-
-**Configure Vibe (Mistral):**
-```bash
-scripts/vibe_install.sh
-scripts/vibe_set_local.sh
-```
-
-**Configure OpenCode (recommended for tool calling):**
-```bash
-scripts/opencode_install.sh
-scripts/opencode_set_local.sh  # Creates gpt-oss-20b-16k automatically
+scripts/lmstudio_server_stop.sh
 ```
 
 **Security hardening (block network access):**
 ```bash
-scripts/security_harden.sh   # Block Vibe, OpenCode, Ollama
+scripts/security_harden.sh   # Block Vibe, OpenCode, LM Studio
 scripts/security_unharden.sh # Restore network access
 ```
 
@@ -72,54 +68,56 @@ bash ci/run_tests.sh
 
 ## Environment Variables
 
-### Server
+### LM Studio
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DEVSTRAL_OLLAMA_MODEL` | devstral-small-2 | Ollama model (macOS) |
-| `DEVSTRAL_MODEL` | auto-detected | vLLM model ID (Linux) |
-| `DEVSTRAL_MAX_MODEL_LEN` | auto-detected | Context length (Linux) |
-| `DEVSTRAL_HOST` | 127.0.0.1 | Bind address |
-| `DEVSTRAL_PORT` | 8080 | Port (Linux; macOS uses 11434) |
+| `LMSTUDIO_PORT` | 1234 | API server port |
+| `LMSTUDIO_HOST` | 127.0.0.1 | Bind address |
+| `LMSTUDIO_MODEL_ID` | auto | Model to load |
+| `LMSTUDIO_CONTEXT_SIZE` | 32768 | Context length |
 
 ### Vibe
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VIBE_CONFIG_PATH` | ~/.vibe/config.toml | Config file path |
-| `VIBE_LOCAL_MODEL_ID` | auto-detected | Model ID in config |
-| `VIBE_LOCAL_PROVIDER_NAME` | ollama (Mac) / local (Linux) | Provider name |
-| `VIBE_LOCAL_API_BASE` | auto | API endpoint |
+| `VIBE_LOCAL_MODEL_ID` | mistralai/devstral-small-2-2512 | Model ID |
 
 ### OpenCode
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENCODE_CONFIG_PATH` | ~/.config/opencode/opencode.json | Config file path |
-| `OPENCODE_LOCAL_MODEL_ID` | gpt-oss-20b-16k | Model ID (16k context for tool calling) |
-| `OPENCODE_LOCAL_API_BASE` | http://localhost:11434/v1 | API endpoint |
+| `OPENCODE_LOCAL_MODEL_ID` | mistralai/devstral-small-2-2512 | Model ID |
 
 ## Architecture
 
 ```
 scripts/
   _common.sh              # Core utilities, hardware detection
-  setup.sh                # Platform dispatcher -> setup_{mac,linux,wsl}.sh
-  setup_mac.sh            # Ollama installation + model pull
+  lmstudio_install.sh     # Install LM Studio + lms CLI
+  lmstudio_download_models.sh # Download recommended models
+  lmstudio_server_start.sh    # Start LM Studio API server
+  lmstudio_server_stop.sh     # Stop server
+  lmstudio_set_local.sh       # One-command GLM-4.7 + OpenCode setup
+  vibe_install.sh         # Install Vibe CLI (from mistral.ai)
+  vibe_set_lmstudio.sh    # Configure Vibe for LM Studio
+  vibe_set_local.sh       # Configure Vibe for Ollama (legacy)
+  vibe_unset_local.sh     # Restore Vibe config from backup
+  opencode_install.sh     # Install OpenCode CLI
+  opencode_set_lmstudio.sh    # Configure OpenCode for LM Studio
+  opencode_set_local.sh       # Configure OpenCode for Ollama (legacy)
+  opencode_unset_local.sh     # Restore OpenCode config from backup
+  security_harden.sh      # Block Vibe/OpenCode/LM Studio network access
+  security_unharden.sh    # Restore network access
+  setup.sh                # Platform dispatcher (vLLM)
   setup_linux.sh          # vLLM pip install (CUDA auto-detect, CPU fallback)
   setup_wsl.sh            # WSL validation + setup_linux.sh
   detect_hardware.sh      # Display hardware info and viable configurations
-  server_start.sh         # Launch Ollama (Mac) or vLLM (Linux)
+  server_start.sh         # Launch vLLM (Linux)
   server_stop.sh          # Graceful shutdown
   teardown.sh             # Remove venv, caches, runtime files
-  vibe_install.sh         # Install Vibe CLI (from mistral.ai)
-  vibe_set_local.sh       # Generate Vibe config.toml for local Ollama
-  vibe_unset_local.sh     # Restore Vibe config from backup
-  opencode_install.sh     # Install OpenCode CLI
-  opencode_set_local.sh   # Generate OpenCode config for local Ollama
-  opencode_unset_local.sh # Restore OpenCode config from backup
-  security_harden.sh      # Block Vibe/OpenCode/Ollama network access
-  security_unharden.sh    # Restore network access
 
 server/
   run_devstral_server.py  # vLLM launcher (Linux only)
@@ -143,12 +141,12 @@ ci/
 
 ## API Endpoints
 
-**macOS (Ollama):**
-- Base URL: `http://127.0.0.1:11434/v1`
-- Models: `devstral-small-2`, `gpt-oss:20b`
+**LM Studio (macOS/Linux):**
+- Base URL: `http://127.0.0.1:1234/v1`
+- Models: `mistralai/devstral-small-2-2512`, `glm-4.7-reap-50`
 - Tool calling: Yes (native support)
 
-**Linux (vLLM):**
+**vLLM (Linux):**
 - Base URL: `http://127.0.0.1:8080/v1`
 - Model name: `mistralai/Devstral-Small-2-24B-Instruct-2512`
 - Tool calling: Yes (`--enable-auto-tool-choice --tool-call-parser mistral`)
@@ -157,15 +155,9 @@ ci/
 
 | Use Case | Model | Size | Why |
 |----------|-------|------|-----|
-| OpenCode (tool calling) | gpt-oss-20b-16k | 14GB | Efficient MoE, good tool calling |
-| Vibe (Mistral native) | devstral-small-2 | 15GB | Native Mistral tool calling format |
+| Vibe + OpenCode | devstral-small-2 | 15GB | Good all-rounder for coding |
+| OpenCode (reasoning) | GLM-4.7-REAP-50 | 30GB | Better reasoning, needs 64GB RAM |
 | Linux NVIDIA | devstral-small-2 | 24GB | Full quality via vLLM |
-
-**Important:** OpenCode requires 8k-64k context for tool calling to work. The default Ollama 4k context causes tools to fail with "invalid tool" errors.
-
-**Performance on Apple Silicon (32GB):**
-- GPT-OSS-20b-16k: ~14GB model + ~3GB KV cache, leaves headroom for system
-- Devstral-small-2: 40-60 tok/s with default context
 
 ## Runtime Directories
 
@@ -175,9 +167,8 @@ ci/
 
 ## Key Constraints
 
-- macOS requires Ollama 0.13.3+ for devstral-small-2, gpt-oss:20b
+- macOS requires LM Studio with MLX backend
 - Linux requires Python 3.11+ for vLLM
-- OpenCode requires 8k+ context for tool calling (16k recommended)
 - Graceful shutdown has 30-second timeout before SIGTERM
 - Multi-GPU (Linux) uses `--tensor-parallel-size` (auto-detected)
 
@@ -186,13 +177,13 @@ ci/
 The `security_harden.sh` script blocks network access for:
 - **Vibe** - prevents telemetry and cloud API calls
 - **OpenCode** - disables autoupdate, telemetry, websearch
-- **Ollama** - prevents model downloads and potential telemetry
+- **LM Studio** - prevents model downloads and potential telemetry
 
-After hardening, applications can only connect to localhost (local Ollama server).
+After hardening, applications can only connect to localhost (local LM Studio server).
 
-**Important:** Pull all required models BEFORE running security_harden.sh:
+**Important:** Download all required models BEFORE running security_harden.sh:
 ```bash
-ollama pull devstral-small-2
-ollama pull gpt-oss:20b
+lms get mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit
+lms get mlx-community/GLM-4.7-REAP-50-mxfp4
 scripts/security_harden.sh
 ```
