@@ -392,8 +392,8 @@ ensure_python_venv() {
 
   case "${platform}" in
     mac)
-      # macOS uses Ollama, not vLLM. This function should not be called on Mac.
-      die "ensure_python_venv should not be called on macOS. Use Ollama instead."
+      # macOS uses LM Studio, not vLLM. This function should not be called on Mac.
+      die "ensure_python_venv should not be called on macOS. Use LM Studio instead."
       ;;
     linux|wsl)
       local py=""

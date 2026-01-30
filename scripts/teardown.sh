@@ -12,13 +12,13 @@ fi
 platform="$(detect_platform)"
 
 if [[ "${platform}" == "mac" ]]; then
-    # macOS: Ollama manages its own model storage (~/.ollama/models)
+    # macOS: LM Studio manages its own model storage
     # We only clean up our runtime directory
     rm -rf "${RUN_DIR}"
     echo "OK (removed ${RUN_DIR})"
     echo ""
-    echo "Note: Ollama models are stored in ~/.ollama/models"
-    echo "To remove models: ollama rm devstral-small-2"
+    echo "Note: LM Studio models are stored in ~/.cache/lm-studio/models"
+    echo "To remove models: lms rm <model-name>"
 else
     # Linux/WSL: Clean up venv and HuggingFace cache
     rm -rf "${VENV_DIR}" "${RUN_DIR}"
