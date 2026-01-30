@@ -167,20 +167,17 @@ scripts/
   lmstudio_set_local.sh       # One-command GLM-4.7 + OpenCode setup
   vibe_install.sh         # Install Vibe CLI
   vibe_set_lmstudio.sh    # Configure Vibe for LM Studio
-  vibe_set_local.sh       # Configure Vibe for Ollama (legacy)
   vibe_unset_local.sh     # Restore Vibe config
   opencode_install.sh     # Install OpenCode CLI
   opencode_set_lmstudio.sh    # Configure OpenCode for LM Studio
-  opencode_set_local.sh       # Configure OpenCode for Ollama (legacy)
   opencode_unset_local.sh     # Restore OpenCode config
   security_harden.sh      # Network isolation
   security_unharden.sh    # Restore network access
-  setup.sh                # Platform dispatcher (vLLM)
-  setup_mac.sh            # macOS vLLM setup (legacy)
+  setup.sh                # Platform dispatcher
   setup_linux.sh          # Linux vLLM setup
   setup_wsl.sh            # WSL setup
-  server_start.sh         # vLLM server (Linux)
-  server_stop.sh          # Stop vLLM
+  server_start.sh         # Start server (LM Studio on Mac, vLLM on Linux)
+  server_stop.sh          # Stop server
   teardown.sh             # Cleanup
 
 server/

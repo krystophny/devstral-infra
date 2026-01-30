@@ -35,5 +35,5 @@ fi
 
 echo ""
 echo "Next steps:"
-echo "  scripts/opencode_set_local.sh  # Configure OpenCode for local Ollama"
-echo "  scripts/security_harden.sh     # Optional: block network access"
+echo "  scripts/opencode_set_lmstudio.sh  # Configure OpenCode for LM Studio"
+echo "  scripts/security_harden.sh        # Optional: block network access"

@@ -5,6 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
+platform="$(detect_platform)"
+
+if [[ "${platform}" == "mac" ]]; then
+    # macOS: Use LM Studio
+    exec "${SCRIPT_DIR}/lmstudio_server_stop.sh"
+fi
+
+# Linux/WSL: Stop vLLM
 migrate_legacy_pid
 
 PID_FILE="$(server_pid_file)"

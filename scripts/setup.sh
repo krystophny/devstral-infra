@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/_common.sh"
 platform="$(detect_platform)"
 
 case "${platform}" in
-  mac)  exec "${SCRIPT_DIR}/setup_mac.sh" ;;
+  mac)  exec "${SCRIPT_DIR}/lmstudio_install.sh" ;;
   wsl)  exec "${SCRIPT_DIR}/setup_wsl.sh" ;;
   linux) exec "${SCRIPT_DIR}/setup_linux.sh" ;;
 esac
