@@ -1,20 +1,22 @@
 # devstral-infra
 
-Cross-platform local inference server for Devstral models.
+Cross-platform local inference server for coding AI models.
 
 - **Auto-detection**: Automatically selects optimal model and configuration based on hardware
 - **Cross-platform**: macOS (Ollama + Metal), Linux (vLLM + CUDA/CPU), Windows (WSL)
 - **Tool calling**: Full tool use support matching official Mistral setup
-- **Vibe integration**: Configure Vibe to use your local server
-- **Security hardening**: Optional network isolation for Vibe
+- **Vibe integration**: Configure Mistral Vibe CLI to use your local server
+- **OpenCode integration**: Configure OpenCode CLI with gpt-oss for efficient tool calling
+- **Security hardening**: Optional network isolation for Vibe, OpenCode, and Ollama
 
 ## Quick Start
 
 ```bash
-chmod +x scripts/*.sh
-scripts/setup.sh           # Install backend (auto-detects platform)
-scripts/server_start.sh    # Start server
-scripts/vibe_set_local.sh  # Configure Vibe to use local server
+chmod +x scripts/*.sh ci/*.sh ci/*.py
+scripts/setup.sh             # Install backend (auto-detects platform)
+scripts/server_start.sh      # Start server
+scripts/vibe_set_local.sh    # Configure Vibe to use local server
+scripts/opencode_set_local.sh  # Configure OpenCode (creates gpt-oss-20b-16k)
 ```
 
 ## Platform Backends
@@ -33,10 +35,13 @@ scripts/vibe_set_local.sh  # Configure Vibe to use local server
 
 ## Supported Models
 
-| Model | Parameters | Memory (Q4) | Context |
-|-------|------------|-------------|---------|
-| devstral-small-2 | 24B | ~15 GB | 384K |
-| devstral-2 | 123B | ~75 GB | 256K |
+| Model | Parameters | Memory (Q4) | Context | Use Case |
+|-------|------------|-------------|---------|----------|
+| devstral-small-2 | 24B | ~15 GB | 384K | Vibe (Mistral native) |
+| gpt-oss:20b | 20B MoE | ~14 GB | 128K | OpenCode (efficient tool calling) |
+| devstral-2 | 123B | ~75 GB | 256K | Linux NVIDIA only |
+
+**Note:** OpenCode requires 8k-64k context for tool calling to work. The default Ollama 4k context causes tools to fail with "invalid tool" errors.
 
 ## Commands
 
@@ -88,11 +93,28 @@ The script auto-configures based on platform:
 - **macOS**: Provider `ollama`, port `11434`, model `devstral-small-2`
 - **Linux**: Provider `local`, port `8080`, model `mistralai/Devstral-Small-2-24B-Instruct-2512`
 
+### OpenCode Integration
+
+```bash
+scripts/opencode_install.sh     # Install OpenCode CLI
+scripts/opencode_set_local.sh   # Configure OpenCode for local server (creates gpt-oss-20b-16k)
+scripts/opencode_unset_local.sh # Restore original OpenCode config
+```
+
+OpenCode uses gpt-oss:20b with 16k context for efficient tool calling.
+
 ### Security (Optional)
 
 ```bash
-scripts/security_harden.sh   # Block Vibe network access (requires sudo)
-scripts/security_unharden.sh # Restore Vibe network access
+scripts/security_harden.sh   # Block Vibe, OpenCode, Ollama network access
+scripts/security_unharden.sh # Restore network access
+```
+
+**Important:** Pull all required models BEFORE hardening:
+```bash
+ollama pull devstral-small-2
+ollama pull gpt-oss:20b
+scripts/security_harden.sh
 ```
 
 ### Cleanup
@@ -144,24 +166,35 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
 | `VIBE_LOCAL_PROVIDER_NAME` | auto | Provider name (ollama on Mac, local on Linux) |
 | `VIBE_LOCAL_API_BASE` | auto | API endpoint |
 
+### OpenCode Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCODE_CONFIG_PATH` | ~/.config/opencode/opencode.json | Config file path |
+| `OPENCODE_LOCAL_MODEL_ID` | gpt-oss-20b-16k | Model ID (16k context for tool calling) |
+| `OPENCODE_LOCAL_API_BASE` | http://localhost:11434/v1 | API endpoint |
+
 ## Architecture
 
 ```
 scripts/
-  _common.sh          # Shared utilities, hardware detection
-  setup.sh            # Platform dispatcher
-  setup_mac.sh        # macOS: Ollama + devstral-small-2
-  setup_linux.sh      # Linux: vLLM (CUDA/CPU)
-  setup_wsl.sh        # WSL setup
-  detect_hardware.sh  # Show hardware and viable configs
-  server_start.sh     # Start server (Ollama or vLLM)
-  server_stop.sh      # Stop server
-  teardown.sh         # Cleanup
-  vibe_install.sh     # Install Vibe CLI
-  vibe_set_local.sh   # Configure Vibe for local server
-  vibe_unset_local.sh # Restore Vibe config
-  security_harden.sh  # Network isolation
-  security_unharden.sh
+  _common.sh            # Shared utilities, hardware detection
+  setup.sh              # Platform dispatcher
+  setup_mac.sh          # macOS: Ollama + devstral-small-2
+  setup_linux.sh        # Linux: vLLM (CUDA/CPU)
+  setup_wsl.sh          # WSL setup
+  detect_hardware.sh    # Show hardware and viable configs
+  server_start.sh       # Start server (Ollama or vLLM)
+  server_stop.sh        # Stop server
+  teardown.sh           # Cleanup
+  vibe_install.sh       # Install Vibe CLI
+  vibe_set_local.sh     # Configure Vibe for local server
+  vibe_unset_local.sh   # Restore Vibe config
+  opencode_install.sh   # Install OpenCode CLI
+  opencode_set_local.sh # Configure OpenCode for local server
+  opencode_unset_local.sh # Restore OpenCode config
+  security_harden.sh    # Network isolation (Vibe, OpenCode, Ollama)
+  security_unharden.sh  # Restore network access
 
 server/
   run_devstral_server.py  # vLLM launcher (Linux only)
