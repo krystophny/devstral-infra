@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Configure OpenCode for local llama.cpp server with GPT-OSS 20B (128k context)
-# Uses GPU+CPU hybrid inference for maximum context length
+# Configure OpenCode for local llama.cpp server with Qwen3.5-35B-A3B.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,7 +12,7 @@ HOST="${DEVSTRAL_HOST:-127.0.0.1}"
 API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
 # Model identifier for OpenCode
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-gpt-oss-20b-128k}"
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen35-a3b-local}"
 CONTEXT_SIZE=131072  # 128k
 
 # OpenCode config location
@@ -51,7 +50,7 @@ cat > "${CONFIG_PATH}" <<EOF
       },
       "models": {
         "${MODEL_ID}": {
-          "name": "GPT-OSS 20B 128k (GPU+CPU hybrid)"
+          "name": "Qwen3.5-35B-A3B (UD-Q4_K_XL, local)"
         }
       }
     }
