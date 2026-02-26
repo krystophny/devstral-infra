@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Start llama.cpp server with GPU+CPU hybrid for 128k context
-# Uses MoE offloading: attention+KV cache on GPU, expert FFN on CPU
+# Start llama.cpp server optimized for fast local coding-agent workloads.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,21 +34,26 @@ if [[ -f "${PID_FILE}" ]]; then
 fi
 
 # Model configuration
-# Use HuggingFace model ID (llama.cpp will download/cache automatically)
-HF_MODEL="${LLAMACPP_HF_MODEL:-ggml-org/gpt-oss-20b-GGUF}"
+# Use HuggingFace model ID (llama.cpp will download/cache automatically).
+HF_MODEL="${LLAMACPP_HF_MODEL:-unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL}"
 
 # Or use local GGUF file if specified
 MODEL_PATH="${LLAMACPP_MODEL:-}"
 
 # Context and threading configuration
 CONTEXT_SIZE="${LLAMACPP_CONTEXT:-131072}"  # 128k default
-CPU_THREADS="${LLAMACPP_THREADS:-$(nproc)}"
+if command -v nproc >/dev/null 2>&1; then
+  cpu_count="$(nproc)"
+else
+  cpu_count="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
+fi
+CPU_THREADS="${LLAMACPP_THREADS:-${cpu_count}}"
+ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-true}"
 # Use reasonable number of threads
 CPU_THREADS=$(( CPU_THREADS > 24 ? 24 : CPU_THREADS ))
 
-# MoE offloading: keep expert FFN on CPU, attention on GPU
-# This regex offloads all MoE expert layers to CPU
-MOE_OFFLOAD="${LLAMACPP_MOE_OFFLOAD:-.ffn_.*_exps.=CPU}"
+# Optional tensor offload rule. Leave empty for max speed on Apple Silicon.
+MOE_OFFLOAD="${LLAMACPP_MOE_OFFLOAD:-}"
 
 echo "Starting llama.cpp server..."
 if [[ -n "${MODEL_PATH}" ]]; then
@@ -59,7 +63,9 @@ else
 fi
 echo "- Context: ${CONTEXT_SIZE} tokens"
 echo "- CPU threads: ${CPU_THREADS}"
-echo "- MoE offload: ${MOE_OFFLOAD}"
+if [[ -n "${MOE_OFFLOAD}" ]]; then
+  echo "- tensor offload rule: ${MOE_OFFLOAD}"
+fi
 
 # Build command
 CMD=(
@@ -75,13 +81,21 @@ fi
 CMD+=(
   -c "${CONTEXT_SIZE}"
   -ngl 99                    # Offload all possible layers to GPU
-  -ot "${MOE_OFFLOAD}"       # But keep MoE experts on CPU
   -fa on                     # Flash attention
+  -np 1                      # Single prediction slot for stable agent behavior
   -t "${CPU_THREADS}"        # CPU threads
   --host "${HOST}"
   --port "${PORT}"
   --jinja                    # Enable Jinja templating
 )
+
+if [[ -n "${MOE_OFFLOAD}" ]]; then
+  CMD+=(-ot "${MOE_OFFLOAD}")
+fi
+
+if [[ "${ENABLE_THINKING}" == "false" ]]; then
+  CMD+=(--chat-template-kwargs '{"enable_thinking": false}')
+fi
 
 # Add extra flags if specified
 if [[ -n "${LLAMACPP_EXTRA_FLAGS:-}" ]]; then
