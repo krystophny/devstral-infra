@@ -36,10 +36,11 @@ fi
 # Model configuration
 # Use HuggingFace model ID (llama.cpp will download/cache automatically).
 # Auto-select Q8 (49GB, higher quality) vs Q4 (18GB) based on available memory.
-# Q8 needs ~75GB headroom (model + KV cache at configured context size).
+# Q8 at 256k context needs ~100GB (49GB model + ~50GB KV cache).
+# Require 130GB usable to leave headroom for OS and other processes.
 if [[ -z "${LLAMACPP_HF_MODEL:-}" ]]; then
   usable_mb="$(detect_vram_mb)"
-  if [[ "${usable_mb}" -ge 100000 ]]; then
+  if [[ "${usable_mb}" -ge 130000 ]]; then
     HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q8_K_XL"
   else
     HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL"
