@@ -170,6 +170,45 @@ ci/
 - Graceful shutdown has 30-second timeout before SIGTERM
 - Multi-GPU (Linux) uses `--tensor-parallel-size` (auto-detected)
 
+## llama.cpp Backend (Qwen3.5-35B-A3B)
+
+**Server script:** `scripts/server_start_llamacpp.sh`
+- Auto-selects Q8_K_XL (49GB, higher quality) on machines with >=130GB usable memory, otherwise Q4_K_XL (18GB)
+- Default context: 262144 (256k)
+- API: `http://127.0.0.1:8080/v1`
+- Override model: `LLAMACPP_HF_MODEL=unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL`
+
+**Local model cache (macOS):** `~/Library/Caches/llama.cpp/`
+- Q4: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf` (18GB, cached)
+- Q8: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf` (49GB)
+
+**Custom llama.cpp fork for hybrid model fixes:**
+- Repo: `/Users/ert/code/llama.cpp` (fork: `krystophny/llama.cpp`)
+- Remotes: `origin` (krystophny), `upstream` (ggml-org), `eauchs` (eauchs)
+- Build: `cmake -B build -G Ninja -DGGML_METAL=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ && cmake --build build -j$(sysctl -n hw.ncpu)`
+- Binary: `/Users/ert/code/llama.cpp/build/bin/llama-server`
+
+**Branches in llama.cpp fork:**
+- `fix-hybrid-spec-bugs` — PR 1: bug fixes for eauchs's SSM state rollback (PR #20075). Against `eauchs/feat/qwen-moe-speculative-decoding`.
+- `hybrid-cache-reuse` — PR 2 (WIP): multi-turn cache reuse for hybrid models. Against `upstream/master`. Depends on PR #20075.
+
+**Testing the custom build with Qwen3.5:**
+```bash
+# Single-turn test
+/Users/ert/code/llama.cpp/build/bin/llama-server \
+  -m ~/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf \
+  -c 32768 -fa -ngl 99 -np 1 --port 18080
+
+# Multi-turn cache reuse test (observe prompt_eval on turn 2+)
+curl -s http://127.0.0.1:18080/v1/chat/completions -d '{
+  "model": "qwen3.5",
+  "messages": [{"role":"system","content":"You are a helpful assistant."},
+               {"role":"user","content":"What is 2+2?"}]
+}' | jq '.usage'
+```
+
+**Speculative decoding note:** Qwen3.5 dense models (0.8B etc) are NOT compatible as draft models for the MoE variants. Spec decoding for Qwen3.5-A3B requires same-architecture drafts which don't exist yet.
+
 ## Security Hardening
 
 The `security_harden.sh` script blocks network access for:
