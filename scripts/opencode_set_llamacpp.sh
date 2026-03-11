@@ -13,7 +13,7 @@ API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
 # Model identifier for OpenCode
 MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen35-a3b-local}"
-CONTEXT_SIZE=131072  # 128k
+CONTEXT_SIZE=262144  # 256k
 
 # OpenCode config location
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
@@ -44,7 +44,7 @@ cat > "${CONFIG_PATH}" <<EOF
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp (local, 128k)",
+      "name": "llama.cpp (local, 256k)",
       "options": {
         "baseURL": "${API_BASE}"
       },
@@ -61,7 +61,7 @@ EOF
 echo "Configured OpenCode for local llama.cpp:"
 echo "- config: ${CONFIG_PATH}"
 echo "- model: ${MODEL_ID}"
-echo "- context: ${CONTEXT_SIZE} tokens (128k)"
+echo "- context: ${CONTEXT_SIZE} tokens (256k)"
 echo "- api_base: ${API_BASE}"
 echo ""
 echo "Usage:"

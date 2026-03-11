@@ -52,7 +52,7 @@ fi
 MODEL_PATH="${LLAMACPP_MODEL:-}"
 
 # Context and threading configuration
-CONTEXT_SIZE="${LLAMACPP_CONTEXT:-131072}"  # 128k default
+CONTEXT_SIZE="${LLAMACPP_CONTEXT:-262144}"  # 256k default
 if command -v nproc >/dev/null 2>&1; then
   cpu_count="$(nproc)"
 else
@@ -147,7 +147,7 @@ cat <<EOF
 started llama.cpp (pid ${pid})
 - url: http://${HOST}:${PORT}/v1
 - log: ${LOG_FILE}
-- context: ${CONTEXT_SIZE} tokens (128k)
+- context: ${CONTEXT_SIZE} tokens (256k)
 
 Note: First request may be slow while model loads into memory.
 EOF
