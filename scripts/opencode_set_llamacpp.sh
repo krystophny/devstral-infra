@@ -50,7 +50,7 @@ cat > "${CONFIG_PATH}" <<EOF
       },
       "models": {
         "${MODEL_ID}": {
-          "name": "Qwen3.5-35B-A3B (UD-Q4_K_XL, local)"
+          "name": "Qwen3.5-35B-A3B (local)"
         }
       }
     }
