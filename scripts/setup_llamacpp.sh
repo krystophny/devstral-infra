@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Setup llama.cpp for GPU+CPU hybrid inference with 128k context
+# Setup llama.cpp for the local Qwen3.5 OpenCode profile with 256k context.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -81,5 +81,5 @@ OK (llama.cpp installed)
 
 Next:
 - Start server: scripts/server_start_llamacpp.sh
-- Configure OpenCode: scripts/opencode_set_local.sh --llamacpp
+- Configure OpenCode: scripts/opencode_set_llamacpp.sh
 EOF
