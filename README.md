@@ -7,6 +7,7 @@ Cross-platform local inference server for coding AI models.
 - **Tool calling**: Full tool use support for coding assistants
 - **Vibe integration**: Configure Mistral Vibe CLI to use your local server
 - **OpenCode integration**: Configure OpenCode CLI for efficient tool calling
+- **llama.cpp + Qwen3.5 profile**: Tested local OpenCode profile with Qwen3.5-35B-A3B Q8 at 256k context
 - **Security hardening**: Optional network isolation for Vibe, OpenCode, and LM Studio
 
 ## Quick Start
@@ -17,6 +18,8 @@ scripts/lmstudio_install.sh       # Install LM Studio (macOS/Linux)
 scripts/lmstudio_server_start.sh  # Start server
 scripts/vibe_set_lmstudio.sh      # Configure Vibe for local server
 scripts/opencode_set_lmstudio.sh  # Configure OpenCode for local server
+scripts/server_start_llamacpp.sh  # Start local llama.cpp Qwen3.5 server on port 8080
+scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp server
 ```
 
 ## Platform Backends
@@ -39,6 +42,7 @@ scripts/opencode_set_lmstudio.sh  # Configure OpenCode for local server
 |-------|------------|----------------|---------|----------|
 | devstral-small-2 | 24B | ~15 GB | 32K | Vibe, OpenCode |
 | GLM-4.7-REAP-50 | 47B | ~30 GB | 32K | OpenCode (reasoning) |
+| Qwen3.5-35B-A3B Q8 | 35B A3B | ~89 GB GGUF + KV cache | 256K | OpenCode local llama.cpp |
 | devstral-2 | 123B | ~75 GB | 32K | High-end hardware |
 
 ## Commands
@@ -88,8 +92,39 @@ scripts/vibe_unset_local.sh   # Restore original Vibe config
 ```bash
 scripts/opencode_install.sh       # Install OpenCode CLI
 scripts/opencode_set_lmstudio.sh  # Configure OpenCode for LM Studio
+scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp
 scripts/opencode_unset_local.sh   # Restore original OpenCode config
 ```
+
+### llama.cpp Local Qwen3.5 Profile
+
+```bash
+scripts/setup_llamacpp.sh
+scripts/server_start_llamacpp.sh
+scripts/opencode_set_llamacpp.sh
+```
+
+Recommended local profile:
+- model: `Qwen3.5-35B-A3B` `UD-Q8_K_XL` when enough unified memory is available
+- context: `262144`
+- context checkpoints: `64`
+- checkpoint interval: `4096`
+- batch / ubatch: `2048 / 512`
+- reasoning: `off` by default for shorter, more stable coding-agent turns
+- launcher: `tmux` on macOS when available, otherwise `nohup`
+- readiness gate: waits for `/v1/models`, not just `/health`
+- for full checkpoint tuning, point `LLAMACPP_SERVER_BIN` at a current local `llama.cpp` build; older packaged releases may not expose `--checkpoint-every-n-tokens`
+
+Environment overrides:
+- `LLAMACPP_SERVER_BIN`
+- `LLAMACPP_MODEL` or `LLAMACPP_HF_MODEL`
+- `LLAMACPP_CONTEXT`
+- `LLAMACPP_CTX_CHECKPOINTS`
+- `LLAMACPP_CHECKPOINT_EVERY_N_TOKENS`
+- `LLAMACPP_BATCH`
+- `LLAMACPP_UBATCH`
+- `LLAMACPP_ENABLE_THINKING`
+- `LLAMACPP_LAUNCHER`
 
 ### One-Command Setup (GLM-4.7 + OpenCode)
 

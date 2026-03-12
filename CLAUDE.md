@@ -173,9 +173,16 @@ ci/
 ## llama.cpp Backend (Qwen3.5-35B-A3B)
 
 **Server script:** `scripts/server_start_llamacpp.sh`
-- Auto-selects Q8_K_XL (49GB, higher quality) on machines with >=130GB usable memory, otherwise Q4_K_XL (18GB)
+- Prefers the local cached `UD-Q8_K_XL` GGUF on machines with >=130GB usable memory, otherwise falls back to Q4
 - Default context: 262144 (256k)
+- Default context checkpoints: 64
+- Default checkpoint interval: 4096 tokens
+- Default batch / ubatch: 2048 / 512
+- Reasoning disabled by default for shorter, more stable OpenCode turns
+- Prefers detached `tmux` supervision on macOS for reliable background operation
+- Waits for `/v1/models` readiness instead of just `/health`
 - API: `http://127.0.0.1:8080/v1`
+- Override binary: `LLAMACPP_SERVER_BIN=/path/to/llama-server`
 - Override model: `LLAMACPP_HF_MODEL=unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL`
 
 **Local model cache (macOS):** `~/Library/Caches/llama.cpp/`
@@ -192,12 +199,27 @@ ci/
 - `fix-hybrid-spec-bugs` — PR 1: bug fixes for eauchs's SSM state rollback (PR #20075). Against `eauchs/feat/qwen-moe-speculative-decoding`.
 - `hybrid-cache-reuse` — PR 2 (WIP): multi-turn cache reuse for hybrid models. Against `upstream/master`. Depends on PR #20075.
 
+**Recommended local OpenCode profile:**
+```bash
+LLAMACPP_CONTEXT=262144 \
+LLAMACPP_CTX_CHECKPOINTS=64 \
+LLAMACPP_CHECKPOINT_EVERY_N_TOKENS=4096 \
+LLAMACPP_BATCH=2048 \
+LLAMACPP_UBATCH=512 \
+LLAMACPP_ENABLE_THINKING=false \
+LLAMACPP_SERVER_BIN=/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server \
+scripts/server_start_llamacpp.sh
+scripts/opencode_set_llamacpp.sh
+```
+
 **Testing the custom build with Qwen3.5:**
 ```bash
 # Single-turn test
 /Users/user/code/llama.cpp/build/bin/llama-server \
-  -m ~/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf \
-  -c 32768 -fa -ngl 99 -np 1 --port 18080
+  -m ~/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf \
+  -c 262144 --ctx-checkpoints 64 --checkpoint-every-n-tokens 4096 \
+  -b 2048 -ub 512 -fa -ngl 99 -np 1 --port 18080 \
+  --reasoning off
 
 # Multi-turn cache reuse test (observe prompt_eval on turn 2+)
 curl -s http://127.0.0.1:18080/v1/chat/completions -d '{

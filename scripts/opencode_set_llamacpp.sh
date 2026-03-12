@@ -13,7 +13,10 @@ API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
 # Model identifier for OpenCode
 MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen35-a3b-local}"
-CONTEXT_SIZE=262144  # 256k
+CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-262144}"
+OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-32768}"
+PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-llama.cpp (local Qwen3.5 profile)}"
+MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-Qwen3.5-35B-A3B (local recommended profile)}"
 
 # OpenCode config location
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
@@ -44,13 +47,17 @@ cat > "${CONFIG_PATH}" <<EOF
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp (local, 256k)",
+      "name": "${PROVIDER_NAME}",
       "options": {
         "baseURL": "${API_BASE}"
       },
       "models": {
         "${MODEL_ID}": {
-          "name": "Qwen3.5-35B-A3B (local)"
+          "name": "${MODEL_NAME}",
+          "limit": {
+            "context": ${CONTEXT_SIZE},
+            "output": ${OUTPUT_LIMIT}
+          }
         }
       }
     }
@@ -61,7 +68,8 @@ EOF
 echo "Configured OpenCode for local llama.cpp:"
 echo "- config: ${CONFIG_PATH}"
 echo "- model: ${MODEL_ID}"
-echo "- context: ${CONTEXT_SIZE} tokens (256k)"
+echo "- context: ${CONTEXT_SIZE} tokens"
+echo "- output limit: ${OUTPUT_LIMIT} tokens"
 echo "- api_base: ${API_BASE}"
 echo ""
 echo "Usage:"
