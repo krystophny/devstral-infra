@@ -173,7 +173,8 @@ ci/
 ## llama.cpp Backend (Qwen3.5-35B-A3B)
 
 **Server script:** `scripts/server_start_llamacpp.sh`
-- Prefers the local cached `UD-Q8_K_XL` GGUF on machines with >=130GB usable memory, otherwise falls back to Q4
+- Prefers the real local sibling build at `/Users/ert/code/llama.cpp-dev/llama.cpp/build/bin/llama-server` when present
+- Defaults to the local cached `UD-Q4_K_XL` GGUF because it is currently the reliable quantization in this setup
 - Default context: 262144 (256k)
 - Default context checkpoints: 64
 - Default checkpoint interval: 4096 tokens
@@ -188,6 +189,7 @@ ci/
 
 **Local model cache (macOS):** `~/Library/Caches/llama.cpp/`
 - Q4: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf` (18GB, cached)
+- Q6: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q6_K_XL.gguf` (download separately, not default)
 - Q8: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf` (49GB)
 
 **llama.cpp source checkout and local experimentation:**
@@ -218,8 +220,8 @@ scripts/opencode_set_llamacpp.sh
 **Testing the custom build with Qwen3.5:**
 ```bash
 # Single-turn test
-/Users/ert/code/llama.cpp/build/bin/llama-server \
-  -m ~/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf \
+/Users/ert/code/llama.cpp-dev/llama.cpp/build/bin/llama-server \
+  -m ~/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf \
   -c 262144 --ctx-checkpoints 64 --checkpoint-every-n-tokens 4096 \
   -b 2048 -ub 512 -fa -ngl 99 -np 1 --port 18080 \
   --reasoning off

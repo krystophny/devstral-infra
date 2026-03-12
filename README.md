@@ -7,7 +7,7 @@ Cross-platform local inference server for coding AI models.
 - **Tool calling**: Full tool use support for coding assistants
 - **Vibe integration**: Configure Mistral Vibe CLI to use your local server
 - **OpenCode integration**: Configure OpenCode CLI for efficient tool calling
-- **llama.cpp + Qwen3.5 profile**: Verified against actual upstream `llama.cpp` `master` for local OpenCode use on Mac Studio
+- **llama.cpp + Qwen3.5 profile**: Uses a real local build from upstream `llama.cpp` `master`, with `Q4` as the default working quantization
 - **Security hardening**: Optional network isolation for Vibe, OpenCode, and LM Studio
 
 ## Quick Start
@@ -42,7 +42,7 @@ scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp serve
 |-------|------------|----------------|---------|----------|
 | devstral-small-2 | 24B | ~15 GB | 32K | Vibe, OpenCode |
 | GLM-4.7-REAP-50 | 47B | ~30 GB | 32K | OpenCode (reasoning) |
-| Qwen3.5-35B-A3B Q8 | 35B A3B | ~89 GB GGUF + KV cache | 256K | OpenCode local llama.cpp |
+| Qwen3.5-35B-A3B Q4 | 35B A3B | ~18 GB GGUF + KV cache | 256K | OpenCode local llama.cpp |
 | devstral-2 | 123B | ~75 GB | 32K | High-end hardware |
 
 ## Commands
@@ -105,7 +105,7 @@ scripts/opencode_set_llamacpp.sh
 ```
 
 Recommended local profile:
-- model: `Qwen3.5-35B-A3B` `UD-Q8_K_XL` when enough unified memory is available
+- model: `Qwen3.5-35B-A3B` `UD-Q4_K_XL` by default
 - context: `262144`
 - context checkpoints: `64`
 - checkpoint interval: `4096`
@@ -114,7 +114,9 @@ Recommended local profile:
 - launcher: `tmux` on macOS when available, otherwise `nohup`
 - readiness gate: waits for `/v1/models`, not just `/health`
 - verify the actual `llama-server` binary version before drawing conclusions; stale local builds were a major source of earlier confusion
-- for full checkpoint tuning, point `LLAMACPP_SERVER_BIN` at a current local `llama.cpp` build; older packaged releases may not expose `--checkpoint-every-n-tokens`
+- by default the launcher prefers `/Users/ert/code/llama.cpp-dev/llama.cpp/build/bin/llama-server` when that real local build exists
+- `Q8` currently reproduces `@`-only gibberish on trivial prompts in this setup and is not the default
+- `Q6` is worth keeping in cache for later evaluation, but is not the default runtime yet
 
 Environment overrides:
 - `LLAMACPP_SERVER_BIN`
