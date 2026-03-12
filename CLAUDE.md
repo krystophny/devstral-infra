@@ -181,6 +181,7 @@ ci/
 - Reasoning disabled by default for shorter, more stable OpenCode turns
 - Prefers detached `tmux` supervision on macOS for reliable background operation
 - Waits for `/v1/models` readiness instead of just `/health`
+- Prints the actual `llama-server` version at launch so stale local builds are visible
 - API: `http://127.0.0.1:8080/v1`
 - Override binary: `LLAMACPP_SERVER_BIN=/path/to/llama-server`
 - Override model: `LLAMACPP_HF_MODEL=unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL`
@@ -189,11 +190,13 @@ ci/
 - Q4: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf` (18GB, cached)
 - Q8: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf` (49GB)
 
-**Custom llama.cpp fork for hybrid model fixes:**
+**llama.cpp source checkout and local experimentation:**
 - Repo: `/Users/ert/code/llama.cpp` (fork: `krystophny/llama.cpp`)
 - Remotes: `origin` (krystophny), `upstream` (ggml-org), `eauchs` (eauchs)
 - Build: `cmake -B build -G Ninja -DGGML_METAL=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ && cmake --build build -j$(sysctl -n hw.ncpu)`
 - Binary: `/Users/ert/code/llama.cpp/build/bin/llama-server`
+
+For normal local OpenCode use, prefer actual upstream `master` behavior and verify the binary version before drawing conclusions.
 
 **Branches in llama.cpp fork:**
 - `fix-hybrid-spec-bugs` — PR 1: bug fixes for eauchs's SSM state rollback (PR #20075). Against `eauchs/feat/qwen-moe-speculative-decoding`.
