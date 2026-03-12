@@ -72,7 +72,8 @@ test_opencode_config() {
   OPENCODE_LOCAL_API_BASE="http://127.0.0.1:8080/v1" \
   bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
 
-  if grep -q '"model": "llamacpp/qwen35-a3b-local"' "${config_path}" && \
+  if grep -q '"model": "llamacpp/qwen"' "${config_path}" && \
+     grep -q '"permission": "allow"' "${config_path}" && \
      grep -q '"context": 262144' "${config_path}" && \
      grep -q '"output": 32768' "${config_path}" && \
      grep -q 'http://127.0.0.1:8080/v1' "${config_path}"; then
