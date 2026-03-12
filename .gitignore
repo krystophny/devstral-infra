@@ -1,6 +1,10 @@
 .venv/
 .hf/
 .run/
+.env
+.env.*
+*.token
+*.secret
 .vibe/
 *.log
 .DS_Store
@@ -10,3 +14,4 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+.aider*
