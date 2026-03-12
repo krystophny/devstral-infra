@@ -15,7 +15,7 @@ VIBE_VERSION="2.0.1"
 LLAMACPP_VERSION="${LLAMACPP_VERSION:-b8157}"
 LLAMACPP_WINDOWS_FLAVOR="${LLAMACPP_WINDOWS_FLAVOR:-win-vulkan-x64}"
 LLAMACPP_ASSET="llama-${LLAMACPP_VERSION}-bin-${LLAMACPP_WINDOWS_FLAVOR}.zip"
-LLAMACPP_MODEL_FILE="${LLAMACPP_MODEL_FILE:-unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf}"
+LLAMACPP_MODEL_FILE="${LLAMACPP_MODEL_FILE:-unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf}"
 
 echo "Creating offline AI package at: ${PACKAGE_DIR}"
 echo "==========================================="
@@ -99,7 +99,7 @@ if [[ -f "${LLAMACPP_CACHE_DIR}/${LLAMACPP_MODEL_FILE}" ]]; then
 else
     echo "  Warning: ${LLAMACPP_CACHE_DIR}/${LLAMACPP_MODEL_FILE} not found"
     echo "  Run llama.cpp once with:"
-    echo "    llama-server -hf unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL"
+    echo "    llama-server -hf unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q8_K_XL"
 fi
 
 # ============================================================
@@ -259,7 +259,9 @@ if not exist "%MODEL_CACHE%\%MODEL_FILE%" (
 echo Starting llama.cpp with Qwen3.5-35B-A3B...
 "%LLAMA_SERVER%" ^
   -m "%MODEL_CACHE%\%MODEL_FILE%" ^
-  -c 131072 ^
+  -c 262144 ^
+  --ctx-checkpoints 64 ^
+  --checkpoint-every-n-tokens 4096 ^
   -ngl 99 ^
   -ctk q8_0 ^
   -ctv q8_0 ^
@@ -267,15 +269,16 @@ echo Starting llama.cpp with Qwen3.5-35B-A3B...
   -mg 0 ^
   -np 1 ^
   -fa on ^
-  -b 512 ^
-  -ub 128 ^
+  -b 2048 ^
+  -ub 512 ^
   --temp 0.6 ^
   --top-p 0.95 ^
   --top-k 20 ^
   --min-p 0.0 ^
   --host 127.0.0.1 ^
   --port 8080 ^
-  --jinja
+  --jinja ^
+  --chat-template-kwargs "{\"enable_thinking\": false}"
 BATCH
 
 # OpenCode config script (llama.cpp / qwen35-a3b-local)
@@ -299,10 +302,10 @@ echo         "baseURL": "http://127.0.0.1:8080/v1"
 echo       },
 echo       "models": {
 echo         "qwen35-a3b-local": {
-echo           "name": "Qwen3.5-35B-A3B UD-Q4_K_XL (local)",
+echo           "name": "Qwen3.5-35B-A3B UD-Q8_K_XL (local)",
 echo           "limit": {
-echo             "context": 131072,
-echo             "output": 32000
+echo             "context": 262144,
+echo             "output": 32768
 echo           }
 echo         }
 echo       }
@@ -350,8 +353,8 @@ echo       "models": {
 echo         "qwen35-a3b-local": {
 echo           "name": "Qwen3.5-35B-A3B (LM Studio)",
 echo           "limit": {
-echo             "context": 131072,
-echo             "output": 32000
+echo             "context": 262144,
+echo             "output": 32768
 echo           }
 echo         }
 echo       }
@@ -422,7 +425,7 @@ Quick Start:
 
 Models Included:
 ----------------
-- Qwen3.5-35B-A3B UD-Q4_K_XL (18GB) - default for llama.cpp + OpenCode
+- Qwen3.5-35B-A3B UD-Q8_K_XL (local preferred profile) - default for llama.cpp + OpenCode
 - GLM-4.7-Flash (17GB) - MoE with MLA support
 - gpt-oss-20b (12GB) - Good for tool calling
 - gpt-oss-120b (70GB) - Large MoE model
