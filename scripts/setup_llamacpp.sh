@@ -82,4 +82,6 @@ OK (llama.cpp installed)
 Next:
 - Start server: scripts/server_start_llamacpp.sh
 - Configure OpenCode: scripts/opencode_set_llamacpp.sh
+- Configure Aider: scripts/aider_set_llamacpp.sh
+- Configure Qwen Code: scripts/qwencode_set_llamacpp.sh
 EOF

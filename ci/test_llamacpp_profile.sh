@@ -89,10 +89,66 @@ test_opencode_config() {
   fi
 }
 
+test_aider_config() {
+  echo "TEST: aider llama.cpp config generation"
+
+  local home_dir="${TMPDIR}/home-aider"
+  mkdir -p "${home_dir}"
+
+  HOME="${home_dir}" \
+  bash "${REPO_ROOT}/scripts/aider_set_llamacpp.sh" >/dev/null
+
+  local conf="${home_dir}/.aider.conf.yml"
+  local settings="${home_dir}/.aider.model.settings.yml"
+
+  if grep -q 'model: openai/qwen' "${conf}" && \
+     grep -q 'openai-api-base: http://127.0.0.1:8080/v1' "${conf}" && \
+     grep -q 'auto-commits: false' "${conf}" && \
+     grep -q 'edit-format: diff' "${conf}" && \
+     grep -q 'name: openai/qwen' "${settings}" && \
+     grep -q 'temperature: 0.6' "${settings}" && \
+     grep -q 'top_p: 0.95' "${settings}"; then
+    echo "PASS: aider config uses the recommended local profile"
+  else
+    echo "FAIL: aider config missing expected fields"
+    echo "--- .aider.conf.yml ---"
+    cat "${conf}"
+    echo "--- .aider.model.settings.yml ---"
+    cat "${settings}"
+    return 1
+  fi
+}
+
+test_qwencode_config() {
+  echo "TEST: qwen-code llama.cpp config generation"
+
+  local home_dir="${TMPDIR}/home-qwencode"
+  mkdir -p "${home_dir}"
+
+  HOME="${home_dir}" \
+  bash "${REPO_ROOT}/scripts/qwencode_set_llamacpp.sh" >/dev/null
+
+  local config="${home_dir}/.qwen/settings.json"
+
+  if grep -q '"id": "qwen"' "${config}" && \
+     grep -q 'http://127.0.0.1:8080/v1' "${config}" && \
+     grep -q '"contextWindowSize": 262144' "${config}" && \
+     grep -q '"temperature": 0.6' "${config}" && \
+     grep -q '"approvalMode": "yolo"' "${config}"; then
+    echo "PASS: qwen-code config uses the recommended local profile"
+  else
+    echo "FAIL: qwen-code config missing expected fields"
+    cat "${config}"
+    return 1
+  fi
+}
+
 echo "=== llama.cpp Profile Tests ==="
 
 test_server_start_dry_run || FAILED=1
 test_opencode_config || FAILED=1
+test_aider_config || FAILED=1
+test_qwencode_config || FAILED=1
 
 echo ""
 if [[ "${FAILED}" -eq 0 ]]; then
