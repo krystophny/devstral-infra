@@ -17,7 +17,7 @@ test_fresh_config() {
   local cfg="${TEST_DIR}/fresh/config.toml"
   rm -rf "${TEST_DIR}/fresh"
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
 
   if [[ ! -f "${cfg}" ]]; then
     echo "FAIL: config file not created"
@@ -38,8 +38,9 @@ test_fresh_config() {
 }
 
 test_existing_config() {
-  echo "TEST: Update existing config"
+  echo "TEST: Update existing config (old settings backed up)"
   local cfg="${TEST_DIR}/existing/config.toml"
+  local bak="${cfg}.devstral-infra.bak"
   mkdir -p "${TEST_DIR}/existing"
   cat > "${cfg}" <<'EOF'
 # Existing config
@@ -47,7 +48,7 @@ active_model = "claude"
 some_other_setting = "value"
 EOF
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
 
   if grep -q 'active_model = "local"' "${cfg}"; then
     echo "PASS: active_model updated"
@@ -55,10 +56,10 @@ EOF
     echo "FAIL: active_model not updated"
     return 1
   fi
-  if grep -q 'some_other_setting = "value"' "${cfg}"; then
-    echo "PASS: existing settings preserved"
+  if grep -q 'some_other_setting = "value"' "${bak}"; then
+    echo "PASS: old settings preserved in backup"
   else
-    echo "FAIL: existing settings lost"
+    echo "FAIL: old settings not found in backup"
     return 1
   fi
 }
@@ -70,7 +71,7 @@ test_backup_created() {
   mkdir -p "${TEST_DIR}/backup"
   echo 'active_model = "original"' > "${cfg}"
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
 
   if [[ -f "${bak}" ]]; then
     echo "PASS: backup created"
@@ -91,11 +92,11 @@ test_idempotency() {
   local cfg="${TEST_DIR}/idempotent/config.toml"
   mkdir -p "${TEST_DIR}/idempotent"
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
   local first_run
   first_run="$(grep -v '^$' "${cfg}")"
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
   local second_run
   second_run="$(grep -v '^$' "${cfg}")"
 
@@ -114,7 +115,7 @@ test_provider_section() {
   local cfg="${TEST_DIR}/provider/config.toml"
   rm -rf "${TEST_DIR}/provider"
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
 
   if grep -q '\[\[providers\]\]' "${cfg}"; then
     echo "PASS: providers section exists"
@@ -137,7 +138,7 @@ test_restore() {
   mkdir -p "${TEST_DIR}/restore"
   echo 'active_model = "original"' > "${cfg}"
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
   VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_unset_local.sh" >/dev/null
 
   if grep -q 'active_model = "original"' "${cfg}"; then
