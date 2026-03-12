@@ -239,10 +239,30 @@ PLIST
     echo "- managed by: launchd (${LAUNCHD_LABEL})"
   else
     # launchctl load fails from SSH sessions (macOS security restriction).
-    # Fall back to background process; plist remains for next login-session start.
-    "${CMD[@]}" >"${LOG_FILE}" 2>&1 &
-    pid=$!
-    disown "${pid}"
+    # Fall back to a detached child process started in a new session.
+    pid="$(
+      python3 - "${LOG_FILE}" "${CMD[@]}" <<'PY'
+import subprocess
+import sys
+
+log_path = sys.argv[1]
+cmd = sys.argv[2:]
+
+with open(log_path, "ab", buffering=0) as log_file:
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+    print(proc.pid)
+PY
+    )"
+    if [[ -z "${pid}" ]]; then
+      die "failed to launch detached llama.cpp background process"
+    fi
     echo "- managed by: background process (launchd plist installed for future use)"
   fi
 
