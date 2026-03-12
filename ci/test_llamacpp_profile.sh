@@ -32,7 +32,8 @@ EOF
   local output
   output="$(
     HOME="${home_dir}" \
-    LLAMACPP_MODEL="${TMPDIR}/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf" \
+    LLAMACPP_MODEL="${TMPDIR}/Qwen3.5-122B-A10B-Q8_0-00001-of-00004.gguf" \
+    LLAMACPP_SMOKE_TEST=false \
     LLAMACPP_DRY_RUN=true \
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
   )"
@@ -41,17 +42,14 @@ EOF
   if [[ -f "${backup_dir}/llamacpp.port" ]]; then mv "${backup_dir}/llamacpp.port" "${port_file}"; fi
   if [[ -f "${backup_dir}/llamacpp.tmux" ]]; then mv "${backup_dir}/llamacpp.tmux" "${tmux_file}"; fi
 
-  local has_reasoning_flag="false"
-  if [[ "${output}" == *"--reasoning off"* || "${output}" == *"enable_thinking"* ]]; then
-    has_reasoning_flag="true"
-  fi
-
   if [[ "${output}" == *"-c 262144"* && \
         "${output}" == *"--ctx-checkpoints 64"* && \
         "${output}" == *"--checkpoint-every-n-tokens 4096"* && \
         "${output}" == *"-b 2048"* && \
         "${output}" == *"-ub 512"* && \
-        "${has_reasoning_flag}" == "true" ]]; then
+        "${output}" != *"--reasoning off"* && \
+        "${output}" != *"enable_thinking"* && \
+        "${output}" == *"Qwen3.5-122B-A10B-Q8_0-00001-of-00004.gguf"* ]]; then
     echo "PASS: launcher emits the recommended local profile"
   else
     echo "FAIL: launcher output did not include the expected profile"
@@ -76,6 +74,12 @@ test_opencode_config() {
      grep -q '"permission": "allow"' "${config_path}" && \
      grep -q '"context": 262144' "${config_path}" && \
      grep -q '"output": 32768' "${config_path}" && \
+     grep -q '"temperature": 0.6' "${config_path}" && \
+     grep -q '"top_p": 0.95' "${config_path}" && \
+     grep -q '"top_k": 20' "${config_path}" && \
+     grep -q '"min_p": 0.0' "${config_path}" && \
+     grep -q '"presence_penalty": 0.0' "${config_path}" && \
+     grep -q '"repeat_penalty": 1.0' "${config_path}" && \
      grep -q 'http://127.0.0.1:8080/v1' "${config_path}"; then
     echo "PASS: OpenCode config uses the recommended local profile"
   else

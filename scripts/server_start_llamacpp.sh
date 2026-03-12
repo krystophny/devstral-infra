@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start llama.cpp server with the recommended local Qwen3.5 OpenCode profile.
+# Start llama.cpp server with the validated local Qwen3.5 OpenCode profile.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,9 +18,8 @@ else
   LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"
 fi
 LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER}")" && pwd)"
-Q6_CACHE_PATH="${HOME}/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q6_K_XL.gguf"
-Q8_CACHE_PATH="${HOME}/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf"
-Q4_CACHE_PATH="${HOME}/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf"
+QWEN122B_Q8_CACHE_DIR="${HOME}/Library/Caches/llama.cpp/lmstudio-community_Qwen3.5-122B-A10B-GGUF"
+QWEN122B_Q8_CACHE_PATH="${QWEN122B_Q8_CACHE_DIR}/Qwen3.5-122B-A10B-Q8_0-00001-of-00004.gguf"
 
 # Check if llama.cpp is installed
 if [[ ! -x "${LLAMA_SERVER}" ]]; then
@@ -36,7 +35,7 @@ PID_FILE="${RUN_DIR}/llamacpp.pid"
 LOG_FILE="${RUN_DIR}/llamacpp.log"
 PORT_FILE="${RUN_DIR}/llamacpp.port"
 TMUX_FILE="${RUN_DIR}/llamacpp.tmux"
-START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-300}"
+START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
 TMUX_SESSION="${LLAMACPP_TMUX_SESSION:-devstral-llamacpp}"
 
 # Check if already running
@@ -50,25 +49,18 @@ if [[ -f "${PID_FILE}" ]]; then
 fi
 
 # Model configuration.
-# Default to the Q4 cache because it is currently the most reliable local option.
 usable_mb="$(detect_vram_mb)"
 MODEL_PATH="${LLAMACPP_MODEL:-}"
 HF_MODEL=""
 if [[ -z "${MODEL_PATH}" ]]; then
   if [[ -n "${LLAMACPP_HF_MODEL:-}" ]]; then
     HF_MODEL="${LLAMACPP_HF_MODEL}"
-  elif [[ -f "${Q4_CACHE_PATH}" ]]; then
-    MODEL_PATH="${Q4_CACHE_PATH}"
-  elif [[ -f "${Q6_CACHE_PATH}" ]]; then
-    MODEL_PATH="${Q6_CACHE_PATH}"
-  elif [[ "${usable_mb}" -ge 130000 && -f "${Q8_CACHE_PATH}" ]]; then
-    MODEL_PATH="${Q8_CACHE_PATH}"
-  elif [[ "${usable_mb}" -ge 130000 ]]; then
-    HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q6_K_XL"
-  elif [[ "${usable_mb}" -ge 130000 ]]; then
-    HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL"
+  elif [[ -f "${QWEN122B_Q8_CACHE_PATH}" ]]; then
+    MODEL_PATH="${QWEN122B_Q8_CACHE_PATH}"
+  elif [[ "${usable_mb}" -ge 180000 ]]; then
+    HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0"
   else
-    HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL"
+    die "Qwen3.5-122B-A10B Q8_0 requires a larger-memory profile or an explicit LLAMACPP_MODEL/LLAMACPP_HF_MODEL override"
   fi
 fi
 
@@ -84,7 +76,9 @@ else
   cpu_count="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 fi
 CPU_THREADS="${LLAMACPP_THREADS:-${cpu_count}}"
-ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-false}"
+ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-true}"
+SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
+SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
 LAUNCHER="${LLAMACPP_LAUNCHER:-auto}"
 # Use reasonable number of threads
@@ -132,6 +126,7 @@ echo "- Batch: ${BATCH_SIZE}"
 echo "- Ubatch: ${UBATCH_SIZE}"
 echo "- CPU threads: ${CPU_THREADS}"
 echo "- Thinking: ${ENABLE_THINKING}"
+echo "- Smoke test: ${SMOKE_TEST}"
 if [[ -n "${MOE_OFFLOAD}" ]]; then
   echo "- tensor offload rule: ${MOE_OFFLOAD}"
 fi
@@ -238,6 +233,78 @@ done
 if ! curl -fsS "http://${HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
   echo "Server started but not responding yet. Check log: ${LOG_FILE}"
   echo "It may still be loading the model."
+fi
+
+if [[ "${SMOKE_TEST}" == "true" ]]; then
+  echo "Running chat-completions smoke test..."
+
+  model_id="$(
+    python3 - "http://${HOST}:${PORT}/v1/models" <<'PY'
+import json
+import sys
+from urllib.request import urlopen
+
+with urlopen(sys.argv[1]) as response:
+    data = json.load(response)
+
+models = data.get("data") or []
+if not models:
+    raise SystemExit("no model ids returned by /v1/models")
+
+model_id = models[0].get("id")
+if not model_id:
+    raise SystemExit("missing model id in /v1/models response")
+
+print(model_id)
+PY
+  )"
+
+  smoke_payload="$(
+    python3 - "${model_id}" "${SMOKE_TEST_PROMPT}" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "model": sys.argv[1],
+    "messages": [{"role": "user", "content": sys.argv[2]}],
+    "max_tokens": 256,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 1,
+    "min_p": 0.0,
+}))
+PY
+  )"
+
+  smoke_response="$(
+    curl -fsS \
+      -H 'Content-Type: application/json' \
+      "http://${HOST}:${PORT}/v1/chat/completions" \
+      -d "${smoke_payload}"
+  )"
+
+  smoke_text="$(
+    python3 - "${smoke_response}" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+choice = (data.get("choices") or [{}])[0]
+message = choice.get("message") or {}
+content = message.get("content") or ""
+reasoning = message.get("reasoning_content") or ""
+print((content + "\n" + reasoning).strip())
+PY
+  )"
+
+  if [[ "${smoke_text}" != *"READY"* ]]; then
+    echo "Smoke test failed: expected READY in response"
+    printf '%s\n' "${smoke_response}"
+    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" >/dev/null 2>&1 || true
+    exit 1
+  fi
+
+  echo "Smoke test passed"
 fi
 
 cat <<EOF
