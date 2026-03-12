@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure OpenCode for local llama.cpp server with Qwen3.5-122B-A10B Q8_0.
+# Configure OpenCode for local llama.cpp server with the benchmark default local Qwen profile.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
