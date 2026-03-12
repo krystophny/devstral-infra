@@ -7,7 +7,7 @@ Cross-platform local inference server for coding AI models.
 - **Tool calling**: Full tool use support for coding assistants
 - **Vibe integration**: Configure Mistral Vibe CLI to use your local server
 - **OpenCode integration**: Configure OpenCode CLI for efficient tool calling
-- **llama.cpp + Qwen3.5 profile**: Uses a real local build from upstream `llama.cpp` `master`, with validated `Qwen3.5-122B-A10B` `Q8_0` as the default local model
+- **llama.cpp local benchmark profile**: Uses a real local build from upstream `llama.cpp` `master`, standardizes Qwen on `Q8_0`, and supports official `GPT-OSS` `MXFP4`
 - **Security hardening**: Optional network isolation for Vibe, OpenCode, and LM Studio
 
 ## Quick Start
@@ -18,8 +18,11 @@ scripts/lmstudio_install.sh       # Install LM Studio (macOS/Linux)
 scripts/lmstudio_server_start.sh  # Start server
 scripts/vibe_set_lmstudio.sh      # Configure Vibe for local server
 scripts/opencode_set_lmstudio.sh  # Configure OpenCode for local server
-scripts/server_start_llamacpp.sh  # Start local llama.cpp Qwen3.5 server on port 8080
+scripts/server_start_llamacpp.sh  # Start local llama.cpp benchmark server on port 8080
 scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp server
+scripts/llamacpp_model_inventory.sh  # Show normalized benchmark model inventory
+scripts/llamacpp_prefetch_models.sh  # Download benchmark model set
+scripts/llamacpp_clean_model_cache.sh  # Remove non-standard local cache entries
 ```
 
 ## Platform Backends
@@ -97,7 +100,7 @@ scripts/opencode_unset_local.sh   # Restore original OpenCode config
 scripts/benchmark_qwen35_family.sh  # Run the full Qwen3.5 llama.cpp benchmark suite
 ```
 
-### llama.cpp Local Qwen3.5 Profile
+### llama.cpp Local Benchmark Profile
 
 ```bash
 scripts/setup_llamacpp.sh
@@ -106,7 +109,9 @@ scripts/opencode_set_llamacpp.sh
 ```
 
 Recommended local profile:
-- model: `Qwen3.5-122B-A10B` `Q8_0` by default
+- default benchmark model: `Qwen3.5-35B-A3B` `Q8_0`
+- supported local Qwen family: `0.8B`, `2B`, `4B`, `9B`, `27B`, `35B-A3B`, `122B-A10B`
+- supported local GPT-OSS family: `20B` `MXFP4`, `120B` `MXFP4`
 - context: `262144`
 - context checkpoints: `64`
 - checkpoint interval: `4096`
@@ -119,7 +124,10 @@ Recommended local profile:
 - startup now runs a real `POST /v1/chat/completions` smoke test and fails fast if inference is broken
 - verify the actual `llama-server` binary version before drawing conclusions; stale local builds were a major source of earlier confusion
 - by default the launcher prefers `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server` when that real local build exists
-- the default local cache target is `~/Library/Caches/llama.cpp/lmstudio-community_Qwen3.5-122B-A10B-GGUF/`
+- normalized local cache root: `~/Library/Caches/llama.cpp/`
+- use `scripts/llamacpp_prefetch_models.sh --mode benchmark` to prefetch the active benchmark set
+- use `scripts/llamacpp_model_inventory.sh --json` to inspect exact resolved paths
+- use `LLAMACPP_MODEL_ALIAS=<alias>` to switch benchmark models without changing scripts
 
 Environment overrides:
 - `LLAMACPP_SERVER_BIN`

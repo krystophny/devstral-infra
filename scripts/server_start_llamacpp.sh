@@ -18,8 +18,7 @@ else
   LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"
 fi
 LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER}")" && pwd)"
-QWEN122B_Q8_CACHE_DIR="${HOME}/Library/Caches/llama.cpp/lmstudio-community_Qwen3.5-122B-A10B-GGUF"
-QWEN122B_Q8_CACHE_PATH="${QWEN122B_Q8_CACHE_DIR}/Qwen3.5-122B-A10B-Q8_0-00001-of-00004.gguf"
+MODELS_SCRIPT="${SCRIPT_DIR}/llamacpp_models.py"
 
 # Check if llama.cpp is installed
 if [[ ! -x "${LLAMA_SERVER}" ]]; then
@@ -36,29 +35,41 @@ LOG_FILE="${RUN_DIR}/llamacpp.log"
 PORT_FILE="${RUN_DIR}/llamacpp.port"
 START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
 
-# Check if already running
-if [[ -f "${PID_FILE}" ]]; then
-  pid="$(cat "${PID_FILE}")"
-  if kill -0 "${pid}" >/dev/null 2>&1; then
-    echo "already running (pid ${pid})"
-    exit 0
-  fi
-  rm -f "${PID_FILE}"
-fi
-
 # Model configuration.
 usable_mb="$(detect_vram_mb)"
 MODEL_PATH="${LLAMACPP_MODEL:-}"
 HF_MODEL=""
+MODEL_ALIAS="${LLAMACPP_MODEL_ALIAS:-qwen3.5-35b-a3b}"
 if [[ -z "${MODEL_PATH}" ]]; then
   if [[ -n "${LLAMACPP_HF_MODEL:-}" ]]; then
     HF_MODEL="${LLAMACPP_HF_MODEL}"
-  elif [[ -f "${QWEN122B_Q8_CACHE_PATH}" ]]; then
-    MODEL_PATH="${QWEN122B_Q8_CACHE_PATH}"
-  elif [[ "${usable_mb}" -ge 180000 ]]; then
-    HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0"
   else
-    die "Qwen3.5-122B-A10B Q8_0 requires a larger-memory profile or an explicit LLAMACPP_MODEL/LLAMACPP_HF_MODEL override"
+    if [[ -x "${MODELS_SCRIPT}" || -f "${MODELS_SCRIPT}" ]]; then
+      resolved_path="$(python3 "${MODELS_SCRIPT}" resolve "${MODEL_ALIAS}" 2>/dev/null || true)"
+      if [[ -n "${resolved_path}" && -f "${resolved_path}" ]]; then
+        MODEL_PATH="${resolved_path}"
+      fi
+    fi
+    if [[ -z "${MODEL_PATH}" ]]; then
+      case "${MODEL_ALIAS}" in
+        qwen3.5-0.8b) HF_MODEL="lmstudio-community/Qwen3.5-0.8B-GGUF:Q8_0" ;;
+        qwen3.5-2b) HF_MODEL="lmstudio-community/Qwen3.5-2B-GGUF:Q8_0" ;;
+        qwen3.5-4b) HF_MODEL="lmstudio-community/Qwen3.5-4B-GGUF:Q8_0" ;;
+        qwen3.5-9b) HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q8_0" ;;
+        qwen3.5-27b) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q8_0" ;;
+        qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
+        qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
+        gpt-oss-20b) HF_MODEL="ggml-org/gpt-oss-20b-GGUF" ;;
+        gpt-oss-120b) HF_MODEL="ggml-org/gpt-oss-120b-GGUF" ;;
+        *)
+          if [[ "${usable_mb}" -ge 180000 ]]; then
+            HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0"
+          else
+            HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0"
+          fi
+          ;;
+      esac
+    fi
   fi
 fi
 
@@ -78,6 +89,15 @@ ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-true}"
 SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
 SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
+# Check if already running
+if [[ "${DRY_RUN}" != "true" && -f "${PID_FILE}" ]]; then
+  pid="$(cat "${PID_FILE}")"
+  if kill -0 "${pid}" >/dev/null 2>&1; then
+    echo "already running (pid ${pid})"
+    exit 0
+  fi
+  rm -f "${PID_FILE}"
+fi
 # Use reasonable number of threads
 CPU_THREADS=$(( CPU_THREADS > 24 ? 24 : CPU_THREADS ))
 
@@ -112,6 +132,7 @@ if [[ -n "${MODEL_PATH}" ]]; then
 else
   echo "- Model: ${HF_MODEL} (HuggingFace, will download if needed)"
 fi
+echo "- Model alias: ${MODEL_ALIAS}"
 echo "- Context: ${CONTEXT_SIZE} tokens"
 echo "- Context checkpoints: ${CTX_CHECKPOINTS}"
 if [[ "${supports_checkpoint_interval}" == "true" ]]; then
