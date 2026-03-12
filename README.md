@@ -94,6 +94,7 @@ scripts/opencode_install.sh       # Install OpenCode CLI
 scripts/opencode_set_lmstudio.sh  # Configure OpenCode for LM Studio
 scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp
 scripts/opencode_unset_local.sh   # Restore original OpenCode config
+scripts/benchmark_qwen35_family.sh  # Run the full Qwen3.5 llama.cpp benchmark suite
 ```
 
 ### llama.cpp Local Qwen3.5 Profile
@@ -131,6 +132,38 @@ Environment overrides:
 - `LLAMACPP_ENABLE_THINKING`
 - `LLAMACPP_SMOKE_TEST`
 - `LLAMACPP_LAUNCHER`
+
+### Qwen3.5 Family Benchmark Suite
+
+```bash
+scripts/benchmark_qwen35_family.sh
+```
+
+What it does:
+- benchmarks all official Qwen3.5 instruct variants from `0.8B` through `122B-A10B`
+- uses `llama.cpp` with `Q8_0` GGUFs when available
+- measures mean `TTFT` and mean `tokens/s`
+- runs four official Qwen reasoning profiles:
+  - Thinking / general
+  - Thinking / precise coding
+  - Non-thinking / general
+  - Non-thinking / reasoning
+- writes `report.md`, `summary.csv`, `raw-results.csv`, `summary.json`, and `raw-results.json`
+
+Defaults:
+- context: `262144`
+- context checkpoints: `64`
+- checkpoint interval: `4096`
+- iterations: `2`
+- max generation tokens: `128`
+- output dir: `../llama.cpp-dev/issues/20428/benchmarks/qwen35-family-<timestamp>`
+
+Useful overrides:
+- `OUTPUT_DIR=/path/to/output`
+- `scripts/benchmark_qwen35_family.sh --models qwen3.5-35b-a3b qwen3.5-122b-a10b`
+- `scripts/benchmark_qwen35_family.sh --iterations 3 --max-tokens 256`
+
+Generated reports are intended to be committed under the sibling meta repo at `../llama.cpp-dev/issues/20428/benchmarks/`.
 
 ### One-Command Setup (GLM-4.7 + OpenCode)
 

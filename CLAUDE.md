@@ -108,6 +108,8 @@ scripts/
   opencode_install.sh     # Install OpenCode CLI
   opencode_set_lmstudio.sh    # Configure OpenCode for LM Studio
   opencode_unset_local.sh     # Restore OpenCode config from backup
+  benchmark_qwen35_family.sh  # Run the full Qwen3.5 llama.cpp benchmark suite
+  benchmark_qwen35_family.py  # Benchmark runner and report generator
   security_harden.sh      # Block Vibe/OpenCode/LM Studio network access
   security_unharden.sh    # Restore network access
   setup.sh                # Platform dispatcher
@@ -218,6 +220,23 @@ LLAMACPP_SERVER_BIN=/Users/ert/code/llama.cpp-dev/llama.cpp/build/bin/llama-serv
 scripts/server_start_llamacpp.sh
 scripts/opencode_set_llamacpp.sh
 ```
+
+**Family benchmark suite:**
+```bash
+scripts/benchmark_qwen35_family.sh
+```
+
+- Benchmarks: `Qwen3.5-0.8B`, `2B`, `4B`, `9B`, `27B`, `35B-A3B`, `122B-A10B`
+- Quant target: `Q8_0`
+- Metrics: mean `TTFT` and mean `timings.predicted_per_second`
+- Profiles:
+  - Thinking / general
+  - Thinking / precise coding
+  - Non-thinking / general
+  - Non-thinking / reasoning
+- Default output: `../llama.cpp-dev/issues/20428/benchmarks/qwen35-family-<timestamp>`
+- Use `--models ...`, `--iterations ...`, and `--max-tokens ...` to narrow or deepen a run
+- Generated reports should be committed into the sibling `llama.cpp-dev` meta repo
 
 **Testing the custom build with Qwen3.5:**
 ```bash
