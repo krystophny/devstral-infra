@@ -11,14 +11,12 @@ platform="$(detect_platform)"
 
 echo "Installing aider-chat..."
 
-if have pip3; then
-  pip3 install aider-chat
-elif have pip; then
-  pip install aider-chat
-elif have uv; then
-  uv tool install aider-chat
+if have uv; then
+  uv tool install --force --python 3.12 aider-chat
+elif have pipx; then
+  pipx install aider-chat
 else
-  echo "No pip or uv found, trying curl installer..."
+  echo "No uv or pipx found, trying curl installer..."
   curl -LsSf https://aider.chat/install.sh | sh
 fi
 

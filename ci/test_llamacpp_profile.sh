@@ -134,6 +134,7 @@ test_qwencode_config() {
      grep -q 'http://127.0.0.1:8080/v1' "${config}" && \
      grep -q '"contextWindowSize": 262144' "${config}" && \
      grep -q '"temperature": 0.6' "${config}" && \
+     grep -q '"selectedType": "openai"' "${config}" && \
      grep -q '"approvalMode": "yolo"' "${config}"; then
     echo "PASS: qwen-code config uses the recommended local profile"
   else
