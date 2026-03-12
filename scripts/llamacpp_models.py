@@ -42,7 +42,7 @@ MODEL_BY_ALIAS = {model.alias: model for model in MODEL_SPECS}
 KEEP_DIRS = {"gguf-headers"}
 
 def find_cli() -> str:
-    for candidate in ("huggingface-cli", "hf"):
+    for candidate in ("hf", "huggingface-cli"):
         path = shutil.which(candidate)
         if path:
             return path
