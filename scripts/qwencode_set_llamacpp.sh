@@ -54,6 +54,11 @@ cat > "${CONFIG_PATH}" <<EOF
   "env": {
     "QWEN_CODE_API_KEY": "local"
   },
+  "security": {
+    "auth": {
+      "selectedType": "openai"
+    }
+  },
   "model": {
     "name": "${MODEL_ID}"
   },
