@@ -13,7 +13,7 @@ API_BASE="http://127.0.0.1:${LMSTUDIO_PORT}/v1"
 CONFIG_PATH="${VIBE_CONFIG_PATH:-${HOME}/.vibe/config.toml}"
 mkdir -p "$(dirname "${CONFIG_PATH}")"
 
-BACKUP_PATH="${CONFIG_PATH}.lmstudio.bak"
+BACKUP_PATH="${CONFIG_PATH}.devstral-infra.bak"
 if [[ -f "${CONFIG_PATH}" && ! -f "${BACKUP_PATH}" ]]; then
     cp "${CONFIG_PATH}" "${BACKUP_PATH}"
     echo "backup: ${BACKUP_PATH}"
@@ -42,6 +42,7 @@ include_model_info = true
 include_project_context = true
 
 # Disable auto-updates for local usage
+enable_auto_update = false
 enable_update_checks = false
 
 # API timeout (seconds) - higher for local inference

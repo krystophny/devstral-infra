@@ -12,7 +12,7 @@ test_vibe_config_no_api_key() {
   cfg="$(mktemp)"
   trap "rm -f ${cfg}" RETURN
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
 
   if grep -q 'api_key_env_var = ""' "${cfg}"; then
     echo "PASS: api_key_env_var is empty"
@@ -28,7 +28,7 @@ test_vibe_config_auto_update_disabled() {
   cfg="$(mktemp)"
   trap "rm -f ${cfg}" RETURN
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
 
   if grep -q 'enable_auto_update = false' "${cfg}"; then
     echo "PASS: enable_auto_update is false"
@@ -44,7 +44,7 @@ test_vibe_config_update_checks_disabled() {
   cfg="$(mktemp)"
   trap "rm -f ${cfg}" RETURN
 
-  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_local.sh" >/dev/null
+  VIBE_CONFIG_PATH="${cfg}" "${REPO_ROOT}/scripts/vibe_set_lmstudio.sh" >/dev/null
 
   if grep -q 'enable_update_checks = false' "${cfg}"; then
     echo "PASS: enable_update_checks is false"
