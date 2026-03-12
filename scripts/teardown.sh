@@ -13,7 +13,7 @@ platform="$(detect_platform)"
 
 if [[ "${platform}" == "mac" ]]; then
     # Unload launchd service if loaded
-    launchctl bootout "gui/$(id -u)/com.devstral.llamacpp" 2>/dev/null || true
+    launchctl unload "${HOME}/Library/LaunchAgents/com.devstral.llamacpp.plist" 2>/dev/null || true
     rm -f "${HOME}/Library/LaunchAgents/com.devstral.llamacpp.plist"
     # macOS: LM Studio manages its own model storage
     # We only clean up our runtime directory

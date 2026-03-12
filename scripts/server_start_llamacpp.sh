@@ -191,7 +191,7 @@ platform="$(detect_platform)"
 if [[ "${platform}" == "mac" ]]; then
   # macOS: launchd user agent
   PLIST_PATH="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
-  launchctl bootout "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null || true
+  launchctl unload "${PLIST_PATH}" 2>/dev/null || true
 
   mkdir -p "${HOME}/Library/LaunchAgents"
   local_args_xml=""
@@ -231,13 +231,21 @@ ${local_args_xml}  </array>
 </plist>
 PLIST
 
-  launchctl bootstrap "gui/$(id -u)" "${PLIST_PATH}"
-  sleep 1
-  pid="$(launchctl list "${LAUNCHD_LABEL}" 2>/dev/null | awk '{print $1}')"
-  if [[ -z "${pid}" || "${pid}" == "-" ]]; then
-    die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
+  if launchctl load "${PLIST_PATH}" 2>/dev/null; then
+    sleep 1
+    pid="$(launchctl list "${LAUNCHD_LABEL}" 2>/dev/null | awk '{print $1}')"
+    if [[ -z "${pid}" || "${pid}" == "-" ]]; then
+      die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
+    fi
+    echo "- managed by: launchd (${LAUNCHD_LABEL})"
+  else
+    # launchctl load fails from SSH sessions (macOS security restriction).
+    # Fall back to background process; plist remains for next login-session start.
+    "${CMD[@]}" >"${LOG_FILE}" 2>&1 &
+    pid=$!
+    disown "${pid}"
+    echo "- managed by: background process (launchd plist installed for future use)"
   fi
-  echo "- managed by: launchd (${LAUNCHD_LABEL})"
 
 else
   # Linux/WSL: systemd user unit
