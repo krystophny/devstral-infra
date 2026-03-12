@@ -8,9 +8,17 @@ source "${SCRIPT_DIR}/_common.sh"
 
 migrate_legacy_pid
 
+SIBLING_LLAMA_SERVER="/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
 LLAMACPP_DIR="${HOME}/.local/llama.cpp"
-LLAMA_SERVER="${LLAMACPP_SERVER_BIN:-${LLAMACPP_DIR}/llama-server}"
+if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
+  LLAMA_SERVER="${LLAMACPP_SERVER_BIN}"
+elif [[ -x "${SIBLING_LLAMA_SERVER}" ]]; then
+  LLAMA_SERVER="${SIBLING_LLAMA_SERVER}"
+else
+  LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"
+fi
 LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER}")" && pwd)"
+Q6_CACHE_PATH="${HOME}/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q6_K_XL.gguf"
 Q8_CACHE_PATH="${HOME}/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf"
 Q4_CACHE_PATH="${HOME}/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf"
 
@@ -42,19 +50,23 @@ if [[ -f "${PID_FILE}" ]]; then
 fi
 
 # Model configuration.
-# Prefer the local Q8 cache when enough unified memory is available.
+# Default to the Q4 cache because it is currently the most reliable local option.
 usable_mb="$(detect_vram_mb)"
 MODEL_PATH="${LLAMACPP_MODEL:-}"
 HF_MODEL=""
 if [[ -z "${MODEL_PATH}" ]]; then
   if [[ -n "${LLAMACPP_HF_MODEL:-}" ]]; then
     HF_MODEL="${LLAMACPP_HF_MODEL}"
-  elif [[ "${usable_mb}" -ge 130000 && -f "${Q8_CACHE_PATH}" ]]; then
-    MODEL_PATH="${Q8_CACHE_PATH}"
   elif [[ -f "${Q4_CACHE_PATH}" ]]; then
     MODEL_PATH="${Q4_CACHE_PATH}"
+  elif [[ -f "${Q6_CACHE_PATH}" ]]; then
+    MODEL_PATH="${Q6_CACHE_PATH}"
+  elif [[ "${usable_mb}" -ge 130000 && -f "${Q8_CACHE_PATH}" ]]; then
+    MODEL_PATH="${Q8_CACHE_PATH}"
   elif [[ "${usable_mb}" -ge 130000 ]]; then
-    HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q8_K_XL"
+    HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q6_K_XL"
+  elif [[ "${usable_mb}" -ge 130000 ]]; then
+    HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL"
   else
     HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL"
   fi

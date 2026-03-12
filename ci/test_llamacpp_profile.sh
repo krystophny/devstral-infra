@@ -32,7 +32,7 @@ EOF
   local output
   output="$(
     HOME="${home_dir}" \
-    LLAMACPP_MODEL="${TMPDIR}/Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf" \
+    LLAMACPP_MODEL="${TMPDIR}/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf" \
     LLAMACPP_DRY_RUN=true \
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
   )"

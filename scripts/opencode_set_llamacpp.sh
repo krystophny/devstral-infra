@@ -15,8 +15,8 @@ API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen35-a3b-local}"
 CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-262144}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-32768}"
-PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-llama.cpp (local upstream-master profile)}"
-MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-Qwen3.5-35B-A3B (local upstream-master profile)}"
+PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-llama.cpp (local upstream-master Q4 profile)}"
+MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-Qwen3.5-35B-A3B UD-Q4_K_XL (local upstream-master default)}"
 
 # OpenCode config location
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
