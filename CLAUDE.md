@@ -9,6 +9,7 @@ devstral-infra is a cross-platform local inference server for coding AI models.
 **Supported models:**
 - devstral-small-2 (24B parameters, ~15GB, 32K context) - for Vibe and OpenCode
 - GLM-4.7-REAP-50 (47B parameters, ~30GB, 32K context) - for OpenCode (reasoning)
+- Qwen3.5-122B-A10B Q8_0 (122B A10B parameters, ~131GB GGUF + runtime buffers, 256K context) - for local llama.cpp + OpenCode on high-memory Macs
 - devstral-2 (123B parameters, ~75GB, 32K context) - high-end hardware
 
 **Supported clients:**
@@ -170,28 +171,28 @@ ci/
 - Graceful shutdown has 30-second timeout before SIGTERM
 - Multi-GPU (Linux) uses `--tensor-parallel-size` (auto-detected)
 
-## llama.cpp Backend (Qwen3.5-35B-A3B)
+## llama.cpp Backend (Qwen3.5-122B-A10B)
 
 **Server script:** `scripts/server_start_llamacpp.sh`
 - Prefers the real local sibling build at `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server` when present
-- Defaults to the local cached `UD-Q4_K_XL` GGUF because it is currently the reliable quantization in this setup
+- Defaults to the validated local cached `Q8_0` GGUF for `Qwen3.5-122B-A10B`
 - Default context: 262144 (256k)
 - Default context checkpoints: 64
 - Default checkpoint interval: 4096 tokens
 - Default batch / ubatch: 2048 / 512
-- Reasoning disabled by default for shorter, more stable OpenCode turns
+- Thinking enabled by default
 - OpenCode config generator sets `permission: "allow"` for the local llama.cpp profile
+- OpenCode config generator sets Qwen coding defaults: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
 - Prefers detached `tmux` supervision on macOS for reliable background operation
 - Waits for `/v1/models` readiness instead of just `/health`
+- Runs a real chat-completions smoke test before declaring startup success
 - Prints the actual `llama-server` version at launch so stale local builds are visible
 - API: `http://127.0.0.1:8080/v1`
 - Override binary: `LLAMACPP_SERVER_BIN=/path/to/llama-server`
-- Override model: `LLAMACPP_HF_MODEL=unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL`
+- Override model: `LLAMACPP_HF_MODEL=lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0`
 
 **Local model cache (macOS):** `~/Library/Caches/llama.cpp/`
-- Q4: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf` (18GB, cached)
-- Q6: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q6_K_XL.gguf` (download separately, not default)
-- Q8: `unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q8_K_XL.gguf` (49GB)
+- 122B Q8: `lmstudio-community_Qwen3.5-122B-A10B-GGUF/Qwen3.5-122B-A10B-Q8_0-00001-of-00004.gguf` (sharded local cache)
 
 **llama.cpp source checkout and local experimentation:**
 - Repo: `/Users/user/code/llama.cpp` (fork: `krystophny/llama.cpp`)
@@ -212,7 +213,7 @@ LLAMACPP_CTX_CHECKPOINTS=64 \
 LLAMACPP_CHECKPOINT_EVERY_N_TOKENS=4096 \
 LLAMACPP_BATCH=2048 \
 LLAMACPP_UBATCH=512 \
-LLAMACPP_ENABLE_THINKING=false \
+LLAMACPP_ENABLE_THINKING=true \
 LLAMACPP_SERVER_BIN=/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server \
 scripts/server_start_llamacpp.sh
 scripts/opencode_set_llamacpp.sh
@@ -222,10 +223,9 @@ scripts/opencode_set_llamacpp.sh
 ```bash
 # Single-turn test
 /Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server \
-  -m ~/Library/Caches/llama.cpp/unsloth_Qwen3.5-35B-A3B-GGUF_Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf \
+  -m ~/Library/Caches/llama.cpp/unsloth_Qwen3.5-122B-A10B-GGUF/UD-Q8_K_XL/Qwen3.5-122B-A10B-UD-Q8_K_XL-00001-of-00005.gguf \
   -c 262144 --ctx-checkpoints 64 --checkpoint-every-n-tokens 4096 \
-  -b 2048 -ub 512 -fa -ngl 99 -np 1 --port 18080 \
-  --reasoning off
+  -b 2048 -ub 512 -fa -ngl 99 -np 1 --port 18080
 
 # Multi-turn cache reuse test (observe prompt_eval on turn 2+)
 curl -s http://127.0.0.1:18080/v1/chat/completions -d '{

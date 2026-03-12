@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure OpenCode for local llama.cpp server with Qwen3.5-35B-A3B.
+# Configure OpenCode for local llama.cpp server with Qwen3.5-122B-A10B Q8_0.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +17,12 @@ CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-262144}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-32768}"
 PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-qwen}"
 MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-qwen}"
+TEMPERATURE="${OPENCODE_LOCAL_TEMPERATURE:-0.6}"
+TOP_P="${OPENCODE_LOCAL_TOP_P:-0.95}"
+TOP_K="${OPENCODE_LOCAL_TOP_K:-20}"
+PRESENCE_PENALTY="${OPENCODE_LOCAL_PRESENCE_PENALTY:-0.0}"
+REPEAT_PENALTY="${OPENCODE_LOCAL_REPEAT_PENALTY:-1.0}"
+MIN_P="${OPENCODE_LOCAL_MIN_P:-0.0}"
 
 # OpenCode config location
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
@@ -55,6 +61,14 @@ cat > "${CONFIG_PATH}" <<EOF
           "limit": {
             "context": ${CONTEXT_SIZE},
             "output": ${OUTPUT_LIMIT}
+          },
+          "options": {
+            "temperature": ${TEMPERATURE},
+            "top_p": ${TOP_P},
+            "top_k": ${TOP_K},
+            "min_p": ${MIN_P},
+            "presence_penalty": ${PRESENCE_PENALTY},
+            "repeat_penalty": ${REPEAT_PENALTY}
           }
         }
       }
@@ -69,6 +83,12 @@ echo "- model: ${MODEL_ID}"
 echo "- context: ${CONTEXT_SIZE} tokens"
 echo "- output limit: ${OUTPUT_LIMIT} tokens"
 echo "- api_base: ${API_BASE}"
+echo "- temperature: ${TEMPERATURE}"
+echo "- top_p: ${TOP_P}"
+echo "- top_k: ${TOP_K}"
+echo "- min_p: ${MIN_P}"
+echo "- presence_penalty: ${PRESENCE_PENALTY}"
+echo "- repeat_penalty: ${REPEAT_PENALTY}"
 echo "- permission: allow"
 echo ""
 echo "Usage:"
