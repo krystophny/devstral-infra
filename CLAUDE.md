@@ -180,6 +180,7 @@ ci/
 - Default checkpoint interval: 4096 tokens
 - Default batch / ubatch: 2048 / 512
 - Reasoning disabled by default for shorter, more stable OpenCode turns
+- OpenCode config generator sets `permission: "allow"` for the local llama.cpp profile
 - Prefers detached `tmux` supervision on macOS for reliable background operation
 - Waits for `/v1/models` readiness instead of just `/health`
 - Prints the actual `llama-server` version at launch so stale local builds are visible

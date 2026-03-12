@@ -12,7 +12,7 @@ HOST="${DEVSTRAL_HOST:-127.0.0.1}"
 API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
 # Model identifier for OpenCode
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen35-a3b-local}"
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen}"
 CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-262144}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-32768}"
 PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-llama.cpp (local upstream-master Q4 profile)}"
@@ -37,11 +37,9 @@ cat > "${CONFIG_PATH}" <<EOF
   "model": "llamacpp/${MODEL_ID}",
   "share": "disabled",
   "autoupdate": false,
+  "permission": "allow",
   "experimental": {
     "openTelemetry": false
-  },
-  "tools": {
-    "websearch": false
   },
   "disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
   "provider": {
@@ -71,6 +69,7 @@ echo "- model: ${MODEL_ID}"
 echo "- context: ${CONTEXT_SIZE} tokens"
 echo "- output limit: ${OUTPUT_LIMIT} tokens"
 echo "- api_base: ${API_BASE}"
+echo "- permission: allow"
 echo ""
 echo "Usage:"
 echo "  1. Start server: scripts/server_start_llamacpp.sh"

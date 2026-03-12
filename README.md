@@ -111,6 +111,7 @@ Recommended local profile:
 - checkpoint interval: `4096`
 - batch / ubatch: `2048 / 512`
 - reasoning: `off` by default for shorter, more stable coding-agent turns
+- OpenCode permissions: `allow` by default for the generated local profile
 - launcher: `tmux` on macOS when available, otherwise `nohup`
 - readiness gate: waits for `/v1/models`, not just `/health`
 - verify the actual `llama-server` binary version before drawing conclusions; stale local builds were a major source of earlier confusion
