@@ -114,7 +114,7 @@ Recommended local profile:
 - thinking: `on` by default
 - OpenCode sampling defaults for precise coding: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
 - OpenCode permissions: `allow` by default for the generated local profile
-- launcher: `tmux` on macOS when available, otherwise `nohup`
+- launcher: `launchd` user agent on macOS, `systemd --user` on Linux
 - readiness gate: waits for `/v1/models`, not just `/health`
 - startup now runs a real `POST /v1/chat/completions` smoke test and fails fast if inference is broken
 - verify the actual `llama-server` binary version before drawing conclusions; stale local builds were a major source of earlier confusion

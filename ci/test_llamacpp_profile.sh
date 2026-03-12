@@ -15,7 +15,6 @@ test_server_start_dry_run() {
   local run_dir="${REPO_ROOT}/.run"
   local pid_file="${run_dir}/llamacpp.pid"
   local port_file="${run_dir}/llamacpp.port"
-  local tmux_file="${run_dir}/llamacpp.tmux"
   local backup_dir="${TMPDIR}/run-backup"
   mkdir -p "${home_dir}/.local/llama.cpp" "${home_dir}/.cache"
   mkdir -p "${backup_dir}"
@@ -27,7 +26,6 @@ EOF
 
   if [[ -f "${pid_file}" ]]; then mv "${pid_file}" "${backup_dir}/llamacpp.pid"; fi
   if [[ -f "${port_file}" ]]; then mv "${port_file}" "${backup_dir}/llamacpp.port"; fi
-  if [[ -f "${tmux_file}" ]]; then mv "${tmux_file}" "${backup_dir}/llamacpp.tmux"; fi
 
   local output
   output="$(
@@ -40,7 +38,6 @@ EOF
 
   if [[ -f "${backup_dir}/llamacpp.pid" ]]; then mv "${backup_dir}/llamacpp.pid" "${pid_file}"; fi
   if [[ -f "${backup_dir}/llamacpp.port" ]]; then mv "${backup_dir}/llamacpp.port" "${port_file}"; fi
-  if [[ -f "${backup_dir}/llamacpp.tmux" ]]; then mv "${backup_dir}/llamacpp.tmux" "${tmux_file}"; fi
 
   if [[ "${output}" == *"-c 262144"* && \
         "${output}" == *"--ctx-checkpoints 64"* && \
