@@ -97,6 +97,13 @@ fi
 MOE_OFFLOAD="${LLAMACPP_MOE_OFFLOAD:-}"
 
 echo "Starting llama.cpp server..."
+echo "- Binary: ${LLAMA_SERVER}"
+version_output="$("${LLAMA_SERVER}" --version 2>&1 || true)"
+if [[ -n "${version_output}" ]]; then
+  while IFS= read -r line; do
+    echo "- ${line}"
+  done <<< "$(printf '%s\n' "${version_output}" | awk '/^version: / || /^built with /')"
+fi
 if [[ -n "${MODEL_PATH}" ]]; then
   echo "- Model: ${MODEL_PATH}"
 else

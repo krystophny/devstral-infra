@@ -7,7 +7,7 @@ Cross-platform local inference server for coding AI models.
 - **Tool calling**: Full tool use support for coding assistants
 - **Vibe integration**: Configure Mistral Vibe CLI to use your local server
 - **OpenCode integration**: Configure OpenCode CLI for efficient tool calling
-- **llama.cpp + Qwen3.5 profile**: Tested local OpenCode profile with Qwen3.5-35B-A3B Q8 at 256k context
+- **llama.cpp + Qwen3.5 profile**: Verified against actual upstream `llama.cpp` `master` for local OpenCode use on Mac Studio
 - **Security hardening**: Optional network isolation for Vibe, OpenCode, and LM Studio
 
 ## Quick Start
@@ -113,6 +113,7 @@ Recommended local profile:
 - reasoning: `off` by default for shorter, more stable coding-agent turns
 - launcher: `tmux` on macOS when available, otherwise `nohup`
 - readiness gate: waits for `/v1/models`, not just `/health`
+- verify the actual `llama-server` binary version before drawing conclusions; stale local builds were a major source of earlier confusion
 - for full checkpoint tuning, point `LLAMACPP_SERVER_BIN` at a current local `llama.cpp` build; older packaged releases may not expose `--checkpoint-every-n-tokens`
 
 Environment overrides:
