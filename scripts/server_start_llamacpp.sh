@@ -34,9 +34,7 @@ PORT="${DEVSTRAL_PORT:-8080}"
 PID_FILE="${RUN_DIR}/llamacpp.pid"
 LOG_FILE="${RUN_DIR}/llamacpp.log"
 PORT_FILE="${RUN_DIR}/llamacpp.port"
-TMUX_FILE="${RUN_DIR}/llamacpp.tmux"
 START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
-TMUX_SESSION="${LLAMACPP_TMUX_SESSION:-devstral-llamacpp}"
 
 # Check if already running
 if [[ -f "${PID_FILE}" ]]; then
@@ -80,7 +78,6 @@ ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-true}"
 SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
 SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
-LAUNCHER="${LLAMACPP_LAUNCHER:-auto}"
 # Use reasonable number of threads
 CPU_THREADS=$(( CPU_THREADS > 24 ? 24 : CPU_THREADS ))
 
@@ -131,14 +128,6 @@ if [[ -n "${MOE_OFFLOAD}" ]]; then
   echo "- tensor offload rule: ${MOE_OFFLOAD}"
 fi
 
-if [[ "${LAUNCHER}" == "auto" ]]; then
-  if [[ "$(detect_platform)" == "mac" ]] && command -v tmux >/dev/null 2>&1; then
-    LAUNCHER="tmux"
-  else
-    LAUNCHER="nohup"
-  fi
-fi
-echo "- launcher: ${LAUNCHER}"
 
 # Build command
 CMD=(
@@ -194,21 +183,97 @@ if [[ "${DRY_RUN}" == "true" ]]; then
   exit 0
 fi
 
-# Start server in background
-rm -f "${TMUX_FILE}"
-if [[ "${LAUNCHER}" == "tmux" ]]; then
-  if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
-    tmux kill-session -t "${TMUX_SESSION}" >/dev/null 2>&1 || true
+# Start server via native service manager
+LAUNCHD_LABEL="com.devstral.llamacpp"
+SYSTEMD_UNIT="devstral-llamacpp"
+platform="$(detect_platform)"
+
+if [[ "${platform}" == "mac" ]]; then
+  # macOS: launchd user agent
+  PLIST_PATH="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
+  launchctl bootout "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null || true
+
+  mkdir -p "${HOME}/Library/LaunchAgents"
+  local_args_xml=""
+  for arg in "${CMD[@]}"; do
+    arg="${arg//&/&amp;}"
+    arg="${arg//</&lt;}"
+    arg="${arg//>/&gt;}"
+    local_args_xml+="      <string>${arg}</string>
+"
+  done
+
+  cat > "${PLIST_PATH}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+${local_args_xml}  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DYLD_LIBRARY_PATH</key>
+    <string>${DYLD_LIBRARY_PATH:-}</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${LOG_FILE}</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_FILE}</string>
+  <key>KeepAlive</key>
+  <false/>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+
+  launchctl bootstrap "gui/$(id -u)" "${PLIST_PATH}"
+  sleep 1
+  pid="$(launchctl list "${LAUNCHD_LABEL}" 2>/dev/null | awk '{print $1}')"
+  if [[ -z "${pid}" || "${pid}" == "-" ]]; then
+    die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
+  fi
+  echo "- managed by: launchd (${LAUNCHD_LABEL})"
+
+else
+  # Linux/WSL: systemd user unit
+  if ! command -v systemctl >/dev/null 2>&1; then
+    die "systemctl not found. systemd is required on Linux."
   fi
 
-  printf -v cmd_string '%q ' "${CMD[@]}"
-  cmd_string="${cmd_string}>$(printf '%q' "${LOG_FILE}") 2>&1"
-  tmux new-session -d -s "${TMUX_SESSION}" "exec ${cmd_string}"
-  pid="$(tmux list-panes -t "${TMUX_SESSION}" -F '#{pane_pid}' | head -1)"
-  echo "${TMUX_SESSION}" > "${TMUX_FILE}"
-else
-  nohup "${CMD[@]}" >"${LOG_FILE}" 2>&1 &
-  pid=$!
+  UNIT_DIR="${HOME}/.config/systemd/user"
+  UNIT_PATH="${UNIT_DIR}/${SYSTEMD_UNIT}.service"
+  mkdir -p "${UNIT_DIR}"
+
+  printf -v exec_start_line '%q ' "${CMD[@]}"
+
+  cat > "${UNIT_PATH}" <<UNIT
+[Unit]
+Description=llama.cpp inference server (devstral-infra)
+
+[Service]
+Type=simple
+ExecStart=${exec_start_line}
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
+Environment=LD_LIBRARY_PATH=${LLAMA_SERVER_DIR}
+
+[Install]
+WantedBy=default.target
+UNIT
+
+  systemctl --user daemon-reload
+  systemctl --user stop "${SYSTEMD_UNIT}" 2>/dev/null || true
+  systemctl --user start "${SYSTEMD_UNIT}"
+  pid="$(systemctl --user show -p MainPID --value "${SYSTEMD_UNIT}")"
+  if [[ -z "${pid}" || "${pid}" == "0" ]]; then
+    die "systemd failed to start ${SYSTEMD_UNIT}. Check: journalctl --user -u ${SYSTEMD_UNIT}"
+  fi
+  echo "- managed by: systemd --user (${SYSTEMD_UNIT})"
 fi
 echo "${pid}" > "${PID_FILE}"
 echo "${PORT}" > "${PORT_FILE}"

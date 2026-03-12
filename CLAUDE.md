@@ -185,7 +185,7 @@ ci/
 - Thinking enabled by default
 - OpenCode config generator sets `permission: "allow"` for the local llama.cpp profile
 - OpenCode config generator sets Qwen coding defaults: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
-- Prefers detached `tmux` supervision on macOS for reliable background operation
+- Uses `launchd` user agent (`com.devstral.llamacpp`) on macOS for proper service management
 - Waits for `/v1/models` readiness instead of just `/health`
 - Runs a real chat-completions smoke test before declaring startup success
 - Prints the actual `llama-server` version at launch so stale local builds are visible
