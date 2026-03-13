@@ -352,8 +352,10 @@ fi
 if [[ "${SMOKE_TEST}" == "true" ]]; then
   echo "Running chat-completions smoke test..."
 
-  model_id="$(
-    python3 - "http://${HOST}:${PORT}/v1/models" <<'PY'
+  model_id=""
+  for (( i = 1; i <= START_TIMEOUT; i++ )); do
+    model_id="$(
+      python3 - "http://${HOST}:${PORT}/v1/models" <<'PY'
 import json
 import sys
 from urllib.request import urlopen
@@ -371,7 +373,23 @@ if not model_id:
 
 print(model_id)
 PY
-  )"
+    )" 2>/dev/null && break || true
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      echo "Model-id probe failed because llama.cpp exited. Check log: ${LOG_FILE}"
+      tail -30 "${LOG_FILE}"
+      exit 1
+    fi
+    if (( i % 10 == 0 )); then
+      echo "Still waiting for /v1/models to stabilize... (${i}s)"
+    fi
+    sleep 1
+  done
+
+  if [[ -z "${model_id}" ]]; then
+    echo "Smoke test failed: could not obtain model id from /v1/models"
+    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" >/dev/null 2>&1 || true
+    exit 1
+  fi
 
   smoke_payload="$(
     python3 - "${model_id}" "${SMOKE_TEST_PROMPT}" <<'PY'
@@ -390,15 +408,21 @@ print(json.dumps({
 PY
   )"
 
-  smoke_response="$(
-    curl -fsS \
-      -H 'Content-Type: application/json' \
-      "http://${HOST}:${PORT}/v1/chat/completions" \
-      -d "${smoke_payload}"
-  )"
-
-  smoke_text="$(
-    python3 - "${smoke_response}" <<'PY'
+  smoke_response=""
+  smoke_error=""
+  smoke_ready="false"
+  for (( i = 1; i <= START_TIMEOUT; i++ )); do
+    smoke_response="$(
+      curl -sS \
+        -H 'Content-Type: application/json' \
+        "http://${HOST}:${PORT}/v1/chat/completions" \
+        -d "${smoke_payload}" \
+        2>&1
+    )"
+    smoke_rc=$?
+    if [[ ${smoke_rc} -eq 0 ]]; then
+      smoke_text="$(
+        python3 - "${smoke_response}" <<'PY'
 import json
 import sys
 
@@ -409,11 +433,29 @@ content = message.get("content") or ""
 reasoning = message.get("reasoning_content") or ""
 print((content + "\n" + reasoning).strip())
 PY
-  )"
+      )"
+      if [[ "${smoke_text}" == *"READY"* ]]; then
+        smoke_ready="true"
+        break
+      fi
+      smoke_error="unexpected smoke response: ${smoke_response}"
+    else
+      smoke_error="${smoke_response}"
+    fi
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      echo "Smoke test failed because llama.cpp exited. Check log: ${LOG_FILE}"
+      tail -30 "${LOG_FILE}"
+      exit 1
+    fi
+    if (( i % 10 == 0 )); then
+      echo "Still waiting for inference readiness... (${i}s)"
+    fi
+    sleep 1
+  done
 
-  if [[ "${smoke_text}" != *"READY"* ]]; then
+  if [[ "${smoke_ready}" != "true" ]]; then
     echo "Smoke test failed: expected READY in response"
-    printf '%s\n' "${smoke_response}"
+    printf '%s\n' "${smoke_error}"
     bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" >/dev/null 2>&1 || true
     exit 1
   fi
