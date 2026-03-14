@@ -82,33 +82,8 @@ PY
 
 echo "catalog: ${CATALOG_PATH}"
 
-# Remove top-level model/model_provider/model_reasoning_effort that would
-# override profile settings (codex bug: globals beat -p profile).
-if [[ -f "${CONFIG_PATH}" ]]; then
-    python3 - "${CONFIG_PATH}" <<'PY'
-import sys, re
-path = sys.argv[1]
-with open(path) as f:
-    content = f.read()
-# Strip conflicting top-level keys (only before first [section])
-first_section = re.search(r'^\[', content, re.MULTILINE)
-if first_section:
-    head = content[:first_section.start()]
-    tail = content[first_section.start():]
-else:
-    head, tail = content, ""
-for key in ("model ", "model_provider ", "model_reasoning_effort "):
-    head = re.sub(r'^' + re.escape(key) + r'=.*\n?', '', head, flags=re.MULTILINE)
-# Set default profile to fast if no profile line exists
-if not re.search(r'^profile\s*=', head, re.MULTILINE):
-    head = 'profile = "fast"\n' + head
-with open(path, "w") as f:
-    f.write(head + tail)
-PY
-    echo "cleaned conflicting top-level model/model_provider settings"
-fi
-
-DEFAULT_PROFILE="${CODEX_DEFAULT_PROFILE:-fast}"
+# Note: we do NOT strip top-level model/model_reasoning_effort — those are the
+# user's default OpenAI settings.  Profiles are selected explicitly with -p.
 
 # Generate config block
 BEGIN_MARKER="# BEGIN DEVSTRAL LOCAL MODELS"
