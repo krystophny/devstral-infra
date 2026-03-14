@@ -1,58 +1,94 @@
 #!/usr/bin/env bash
-# Stop llama.cpp server
+# Stop llama.cpp server instance(s).
+# Usage: server_stop_llamacpp.sh [instance]
+#   instance: "local" (default), "fast", or "all" (stops both)
+#   Also settable via LLAMACPP_INSTANCE env var.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
-PID_FILE="${RUN_DIR}/llamacpp.pid"
-LAUNCHD_LABEL="com.devstral.llamacpp"
-PLIST_PATH="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
-SYSTEMD_UNIT="devstral-llamacpp"
-platform="$(detect_platform)"
+INSTANCE="${1:-${LLAMACPP_INSTANCE:-local}}"
 
-if [[ "${platform}" == "mac" ]]; then
-  # Try launchd first
-  if launchctl list "${LAUNCHD_LABEL}" >/dev/null 2>&1; then
-    echo "stopping llama.cpp (launchd: ${LAUNCHD_LABEL})..."
-    launchctl unload "${PLIST_PATH}" 2>/dev/null || true
-    rm -f "${PID_FILE}" "${RUN_DIR}/llamacpp.port"
+stop_instance() {
+  local inst="$1"
+  local pid_file="${RUN_DIR}/llamacpp-${inst}.pid"
+  local port_file="${RUN_DIR}/llamacpp-${inst}.port"
+  local launchd_label="com.devstral.llamacpp-${inst}"
+  local plist_path="${HOME}/Library/LaunchAgents/${launchd_label}.plist"
+  local systemd_unit="devstral-llamacpp-${inst}"
+  local platform
+  platform="$(detect_platform)"
+
+  # Migrate old unsuffixed files for the "local" instance
+  if [[ "${inst}" == "local" ]]; then
+    for ext in pid port log; do
+      local old="${RUN_DIR}/llamacpp.${ext}"
+      local new="${RUN_DIR}/llamacpp-local.${ext}"
+      if [[ -f "${old}" && ! -f "${new}" ]]; then
+        mv "${old}" "${new}"
+      fi
+      rm -f "${old}"
+    done
+
+    # Also try stopping the old unsuffixed launchd label
+    local old_label="com.devstral.llamacpp"
+    local old_plist="${HOME}/Library/LaunchAgents/${old_label}.plist"
+    if [[ "${platform}" == "mac" ]] && launchctl list "${old_label}" >/dev/null 2>&1; then
+      launchctl unload "${old_plist}" 2>/dev/null || true
+    fi
+  fi
+
+  if [[ "${platform}" == "mac" ]]; then
+    if launchctl list "${launchd_label}" >/dev/null 2>&1; then
+      echo "stopping llama.cpp [${inst}] (launchd: ${launchd_label})..."
+      launchctl unload "${plist_path}" 2>/dev/null || true
+      rm -f "${pid_file}" "${port_file}"
+      echo "stopped"
+      return 0
+    fi
+    if [[ ! -f "${pid_file}" ]]; then
+      echo "[${inst}] not running"
+      return 0
+    fi
+    local pid
+    pid="$(cat "${pid_file}")"
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      echo "[${inst}] not running (stale pid file)"
+      rm -f "${pid_file}" "${port_file}"
+      return 0
+    fi
+    echo "stopping llama.cpp [${inst}] (pid ${pid})..."
+    kill "${pid}" 2>/dev/null || true
+    for _ in {1..30}; do
+      if ! kill -0 "${pid}" 2>/dev/null; then break; fi
+      sleep 1
+    done
+    if kill -0 "${pid}" 2>/dev/null; then
+      echo "force killing..."
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
+    rm -f "${pid_file}" "${port_file}"
     echo "stopped"
-    exit 0
+  else
+    if ! systemctl --user is-active "${systemd_unit}" >/dev/null 2>&1; then
+      echo "[${inst}] not running"
+      rm -f "${pid_file}" "${port_file}"
+      return 0
+    fi
+    echo "stopping llama.cpp [${inst}] (systemd: ${systemd_unit})..."
+    systemctl --user stop "${systemd_unit}"
+    rm -f "${pid_file}" "${port_file}"
+    echo "stopped"
   fi
-  # Fall back to PID (SSH session where launchd wasn't available at start)
-  if [[ ! -f "${PID_FILE}" ]]; then
-    echo "not running"
-    exit 0
-  fi
-  pid="$(cat "${PID_FILE}")"
-  if ! kill -0 "${pid}" 2>/dev/null; then
-    echo "not running (stale pid file)"
-    rm -f "${PID_FILE}" "${RUN_DIR}/llamacpp.port"
-    exit 0
-  fi
-  echo "stopping llama.cpp (pid ${pid})..."
-  kill "${pid}" 2>/dev/null || true
-  for _ in {1..30}; do
-    if ! kill -0 "${pid}" 2>/dev/null; then break; fi
-    sleep 1
-  done
-  if kill -0 "${pid}" 2>/dev/null; then
-    echo "force killing..."
-    kill -9 "${pid}" 2>/dev/null || true
-  fi
-  rm -f "${PID_FILE}" "${RUN_DIR}/llamacpp.port"
-  echo "stopped"
+}
+
+if [[ "${INSTANCE}" == "all" ]]; then
+  stop_instance "local"
+  stop_instance "fast"
+elif [[ "${INSTANCE}" == "local" || "${INSTANCE}" == "fast" ]]; then
+  stop_instance "${INSTANCE}"
 else
-  # Linux: systemd
-  if ! systemctl --user is-active "${SYSTEMD_UNIT}" >/dev/null 2>&1; then
-    echo "not running"
-    rm -f "${PID_FILE}" "${RUN_DIR}/llamacpp.port"
-    exit 0
-  fi
-  echo "stopping llama.cpp (systemd: ${SYSTEMD_UNIT})..."
-  systemctl --user stop "${SYSTEMD_UNIT}"
-  rm -f "${PID_FILE}" "${RUN_DIR}/llamacpp.port"
-  echo "stopped"
+  die "unknown instance: ${INSTANCE} (expected: local, fast, all)"
 fi

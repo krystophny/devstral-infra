@@ -13,8 +13,8 @@ test_server_start_dry_run() {
 
   local home_dir="${TMPDIR}/home"
   local run_dir="${REPO_ROOT}/.run"
-  local pid_file="${run_dir}/llamacpp.pid"
-  local port_file="${run_dir}/llamacpp.port"
+  local pid_file="${run_dir}/llamacpp-local.pid"
+  local port_file="${run_dir}/llamacpp-local.port"
   local backup_dir="${TMPDIR}/run-backup"
   mkdir -p "${home_dir}/.local/llama.cpp" "${home_dir}/.cache"
   mkdir -p "${backup_dir}"
@@ -24,8 +24,8 @@ exit 0
 EOF
   chmod +x "${home_dir}/.local/llama.cpp/llama-server"
 
-  if [[ -f "${pid_file}" ]]; then mv "${pid_file}" "${backup_dir}/llamacpp.pid"; fi
-  if [[ -f "${port_file}" ]]; then mv "${port_file}" "${backup_dir}/llamacpp.port"; fi
+  if [[ -f "${pid_file}" ]]; then mv "${pid_file}" "${backup_dir}/llamacpp-local.pid"; fi
+  if [[ -f "${port_file}" ]]; then mv "${port_file}" "${backup_dir}/llamacpp-local.port"; fi
 
   local output
   output="$(
@@ -36,8 +36,8 @@ EOF
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
   )"
 
-  if [[ -f "${backup_dir}/llamacpp.pid" ]]; then mv "${backup_dir}/llamacpp.pid" "${pid_file}"; fi
-  if [[ -f "${backup_dir}/llamacpp.port" ]]; then mv "${backup_dir}/llamacpp.port" "${port_file}"; fi
+  if [[ -f "${backup_dir}/llamacpp-local.pid" ]]; then mv "${backup_dir}/llamacpp-local.pid" "${pid_file}"; fi
+  if [[ -f "${backup_dir}/llamacpp-local.port" ]]; then mv "${backup_dir}/llamacpp-local.port" "${port_file}"; fi
 
   if [[ "${output}" == *"-c 262144"* && \
         "${output}" == *"--ctx-checkpoints 64"* && \

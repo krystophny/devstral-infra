@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Start llama.cpp server with the validated local Qwen3.5 OpenCode profile.
+# Usage: server_start_llamacpp.sh [instance]
+#   instance: "local" (default, port 8080, thinking on) or "fast" (port 8081, thinking off)
+#   Also settable via LLAMACPP_INSTANCE env var.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,6 +10,56 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 
 migrate_legacy_pid
+
+# --- Instance resolution ---
+INSTANCE="${1:-${LLAMACPP_INSTANCE:-local}}"
+if [[ "${INSTANCE}" != "local" && "${INSTANCE}" != "fast" ]]; then
+  die "unknown instance: ${INSTANCE} (expected: local, fast)"
+fi
+
+# Migrate old unsuffixed pid/port/log files to the "local" instance
+for ext in pid port log; do
+  old="${RUN_DIR}/llamacpp.${ext}"
+  new="${RUN_DIR}/llamacpp-local.${ext}"
+  if [[ -f "${old}" && ! -f "${new}" ]]; then
+    mv "${old}" "${new}"
+  fi
+  rm -f "${old}"
+done
+
+# Helper: resolve an instance-specific env var with fallback to the generic one.
+# Usage: instance_var VARNAME DEFAULT
+#   Checks LLAMACPP_{UPPER_INSTANCE}_{VARNAME}, then LLAMACPP_{VARNAME}, then DEFAULT.
+instance_var() {
+  local varname="$1" default="$2"
+  local upper_instance
+  upper_instance="$(printf '%s' "${INSTANCE}" | tr '[:lower:]' '[:upper:]')"
+  local specific="LLAMACPP_${upper_instance}_${varname}"
+  local generic="LLAMACPP_${varname}"
+  if [[ -n "${!specific:-}" ]]; then
+    printf '%s' "${!specific}"
+  elif [[ -n "${!generic:-}" ]]; then
+    printf '%s' "${!generic}"
+  else
+    printf '%s' "${default}"
+  fi
+}
+
+# --- Instance defaults ---
+case "${INSTANCE}" in
+  local)
+    DEFAULT_PORT="8080"
+    DEFAULT_MODEL_ALIAS="qwen3.5-35b-a3b"
+    DEFAULT_CONTEXT="262144"
+    DEFAULT_THINKING="true"
+    ;;
+  fast)
+    DEFAULT_PORT="8081"
+    DEFAULT_MODEL_ALIAS="qwen3.5-9b"
+    DEFAULT_CONTEXT="32768"
+    DEFAULT_THINKING="false"
+    ;;
+esac
 
 SIBLING_LLAMA_SERVER="/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
 LLAMACPP_DIR="${HOME}/.local/llama.cpp"
@@ -28,18 +81,18 @@ fi
 export DYLD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
 
 HOST="${DEVSTRAL_HOST:-127.0.0.1}"
-PORT="${DEVSTRAL_PORT:-8080}"
+PORT="${DEVSTRAL_PORT:-${DEFAULT_PORT}}"
 
-PID_FILE="${RUN_DIR}/llamacpp.pid"
-LOG_FILE="${RUN_DIR}/llamacpp.log"
-PORT_FILE="${RUN_DIR}/llamacpp.port"
+PID_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.pid"
+LOG_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.log"
+PORT_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.port"
 START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
 
 # Model configuration.
 usable_mb="$(detect_vram_mb)"
 MODEL_PATH="${LLAMACPP_MODEL:-}"
 HF_MODEL=""
-MODEL_ALIAS="${LLAMACPP_MODEL_ALIAS:-qwen3.5-35b-a3b}"
+MODEL_ALIAS="$(instance_var MODEL_ALIAS "${DEFAULT_MODEL_ALIAS}")"
 if [[ -z "${MODEL_PATH}" ]]; then
   if [[ -n "${LLAMACPP_HF_MODEL:-}" ]]; then
     HF_MODEL="${LLAMACPP_HF_MODEL}"
@@ -74,7 +127,7 @@ if [[ -z "${MODEL_PATH}" ]]; then
 fi
 
 # Context and throughput configuration
-CONTEXT_SIZE="${LLAMACPP_CONTEXT:-262144}"
+CONTEXT_SIZE="$(instance_var CONTEXT "${DEFAULT_CONTEXT}")"
 CTX_CHECKPOINTS="${LLAMACPP_CTX_CHECKPOINTS:-64}"
 CHECKPOINT_EVERY_N_TOKENS="${LLAMACPP_CHECKPOINT_EVERY_N_TOKENS:-4096}"
 BATCH_SIZE="${LLAMACPP_BATCH:-2048}"
@@ -85,7 +138,7 @@ else
   cpu_count="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 fi
 CPU_THREADS="${LLAMACPP_THREADS:-${cpu_count}}"
-ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-true}"
+ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-${DEFAULT_THINKING}}"
 SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
 SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
@@ -119,7 +172,7 @@ fi
 # Optional tensor offload rule. Leave empty for max speed on Apple Silicon.
 MOE_OFFLOAD="${LLAMACPP_MOE_OFFLOAD:-}"
 
-echo "Starting llama.cpp server..."
+echo "Starting llama.cpp server (instance: ${INSTANCE})..."
 echo "- Binary: ${LLAMA_SERVER}"
 version_output="$("${LLAMA_SERVER}" --version 2>&1 || true)"
 if [[ -n "${version_output}" ]]; then
@@ -204,8 +257,8 @@ if [[ "${DRY_RUN}" == "true" ]]; then
 fi
 
 # Start server via native service manager
-LAUNCHD_LABEL="com.devstral.llamacpp"
-SYSTEMD_UNIT="devstral-llamacpp"
+LAUNCHD_LABEL="com.devstral.llamacpp-${INSTANCE}"
+SYSTEMD_UNIT="devstral-llamacpp-${INSTANCE}"
 platform="$(detect_platform)"
 
 if [[ "${platform}" == "mac" ]]; then
@@ -386,7 +439,7 @@ PY
 
   if [[ -z "${model_id}" ]]; then
     echo "Smoke test failed: could not obtain model id from /v1/models"
-    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" >/dev/null 2>&1 || true
+    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" "${INSTANCE}" >/dev/null 2>&1 || true
     exit 1
   fi
 
@@ -455,7 +508,7 @@ PY
   if [[ "${smoke_ready}" != "true" ]]; then
     echo "Smoke test failed: expected READY in response"
     printf '%s\n' "${smoke_error}"
-    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" >/dev/null 2>&1 || true
+    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" "${INSTANCE}" >/dev/null 2>&1 || true
     exit 1
   fi
 
@@ -463,12 +516,13 @@ PY
 fi
 
 cat <<EOF
-started llama.cpp (pid ${pid})
+started llama.cpp [${INSTANCE}] (pid ${pid})
 - url: http://${HOST}:${PORT}/v1
 - log: ${LOG_FILE}
 - context: ${CONTEXT_SIZE} tokens
 - ctx checkpoints: ${CTX_CHECKPOINTS}
 - checkpoint interval: $(if [[ "${supports_checkpoint_interval}" == "true" ]]; then printf '%s tokens' "${CHECKPOINT_EVERY_N_TOKENS}"; else printf '%s' 'runtime default'; fi)
+- thinking: ${ENABLE_THINKING}
 
 Note: First request may be slow while model loads into memory.
 EOF
