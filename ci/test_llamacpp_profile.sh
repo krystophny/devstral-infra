@@ -146,10 +146,12 @@ test_codex_config() {
 
   local home_dir="${TMPDIR}/home-codex"
   local config_path="${TMPDIR}/codex-config.toml"
+  local catalog_path="${TMPDIR}/codex-catalog.json"
   mkdir -p "${home_dir}"
 
   HOME="${home_dir}" \
   CODEX_CONFIG_PATH="${config_path}" \
+  CODEX_CATALOG_PATH="${catalog_path}" \
   bash "${REPO_ROOT}/scripts/codex_set_llamacpp.sh" >/dev/null
 
   if grep -q 'wire_api = "responses"' "${config_path}" && \
@@ -159,11 +161,80 @@ test_codex_config() {
      grep -q '\[profiles.fast\]' "${config_path}" && \
      grep -q 'web_search = "disabled"' "${config_path}" && \
      grep -q 'model_provider = "local"' "${config_path}" && \
-     grep -q 'model_provider = "fast"' "${config_path}"; then
+     grep -q 'model_provider = "fast"' "${config_path}" && \
+     grep -q 'model_catalog_json' "${config_path}"; then
     echo "PASS: Codex config has both local and fast profiles with Responses API"
   else
     echo "FAIL: Codex config missing expected fields"
     cat "${config_path}"
+    return 1
+  fi
+}
+
+test_codex_model_catalog() {
+  echo "TEST: Codex model catalog JSON generation"
+
+  local home_dir="${TMPDIR}/home-codex-catalog"
+  local config_path="${TMPDIR}/codex-catalog-cfg.toml"
+  local catalog_path="${TMPDIR}/codex-models.json"
+  mkdir -p "${home_dir}"
+
+  HOME="${home_dir}" \
+  CODEX_CONFIG_PATH="${config_path}" \
+  CODEX_CATALOG_PATH="${catalog_path}" \
+  CODEX_LOCAL_MODEL="Qwen3.5-122B-A10B" \
+  CODEX_FAST_MODEL="Qwen3.5-9B" \
+  CODEX_LOCAL_CONTEXT=262144 \
+  CODEX_FAST_CONTEXT=32768 \
+  bash "${REPO_ROOT}/scripts/codex_set_llamacpp.sh" >/dev/null
+
+  if [[ ! -f "${catalog_path}" ]]; then
+    echo "FAIL: catalog file not created"
+    return 1
+  fi
+
+  local valid
+  valid="$(python3 - "${catalog_path}" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+models = data.get("models", [])
+if len(models) != 2:
+    print(f"FAIL: expected 2 models, got {len(models)}")
+    sys.exit(1)
+slugs = [m["slug"] for m in models]
+if "Qwen3.5-122B-A10B" not in slugs:
+    print(f"FAIL: missing Qwen3.5-122B-A10B slug, got {slugs}")
+    sys.exit(1)
+if "Qwen3.5-9B" not in slugs:
+    print(f"FAIL: missing Qwen3.5-9B slug, got {slugs}")
+    sys.exit(1)
+for m in models:
+    for field in ("base_instructions", "context_window", "truncation_policy",
+                  "supports_parallel_tool_calls", "auto_compact_token_limit"):
+        if field not in m:
+            print(f"FAIL: model {m['slug']} missing field {field}")
+            sys.exit(1)
+local = [m for m in models if m["slug"] == "Qwen3.5-122B-A10B"][0]
+fast = [m for m in models if m["slug"] == "Qwen3.5-9B"][0]
+if local["context_window"] != 262144:
+    print(f"FAIL: local context_window={local['context_window']}, expected 262144")
+    sys.exit(1)
+if fast["context_window"] != 32768:
+    print(f"FAIL: fast context_window={fast['context_window']}, expected 32768")
+    sys.exit(1)
+if local["truncation_policy"]["mode"] != "tokens":
+    print(f"FAIL: truncation mode={local['truncation_policy']['mode']}, expected tokens")
+    sys.exit(1)
+print("OK")
+PY
+  )"
+
+  if [[ "${valid}" == "OK" ]]; then
+    echo "PASS: model catalog has correct slugs, context windows, and required fields"
+  else
+    echo "FAIL: ${valid}"
+    cat "${catalog_path}"
     return 1
   fi
 }
@@ -287,6 +358,7 @@ test_opencode_config || FAILED=1
 test_aider_config || FAILED=1
 test_qwencode_config || FAILED=1
 test_codex_config || FAILED=1
+test_codex_model_catalog || FAILED=1
 test_codex_config_preserves_existing || FAILED=1
 test_codex_config_updates_existing_block || FAILED=1
 
