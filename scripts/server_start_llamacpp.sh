@@ -396,6 +396,7 @@ Environment=HF_HOME=${HF_HOME_DIR}
 Environment=HF_HUB_CACHE=${LLAMACPP_CACHE_ROOT}
 Environment=HUGGINGFACE_HUB_CACHE=${LLAMACPP_CACHE_ROOT}
 Environment=LLAMACPP_CACHE_ROOT=${LLAMACPP_CACHE_ROOT}
+Environment=LLAMA_CACHE=${LLAMA_CACHE}
 
 [Install]
 WantedBy=default.target

@@ -50,6 +50,9 @@ else
   LLAMACPP_CACHE_ROOT="${LLAMACPP_CACHE_ROOT:-$(default_llamacpp_cache_root)}"
 fi
 
+# Current llama.cpp -hf downloads respect LLAMA_CACHE rather than HF_HUB_CACHE.
+LLAMA_CACHE="${LLAMA_CACHE:-${LLAMACPP_CACHE_ROOT}}"
+
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv}"
 
 mkdir -p "${RUN_DIR}" "${LOG_DIR}"
