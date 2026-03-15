@@ -24,19 +24,19 @@ default_llamacpp_cache_root() {
   esac
 }
 
-AGAI_ROOT="${AGAI_ROOT:-${DEVSTRAL_AGAI_ROOT:-$(default_agai_root)}}"
+AGAI_ROOT="${AGAI_ROOT:-$(default_agai_root)}"
 if [[ -n "${AGAI_ROOT}" ]]; then
-  DEVSTRAL_DATA_ROOT="${DEVSTRAL_DATA_ROOT:-${AGAI_ROOT}/data/devstral}"
-  RUN_DIR="${RUN_DIR:-${DEVSTRAL_DATA_ROOT}/run}"
-  LOG_DIR="${LOG_DIR:-${DEVSTRAL_DATA_ROOT}/logs}"
+  LLAMACPP_DATA_ROOT="${LLAMACPP_DATA_ROOT:-${AGAI_ROOT}/data/llama.cpp}"
+  RUN_DIR="${RUN_DIR:-${LLAMACPP_DATA_ROOT}/run}"
+  LOG_DIR="${LOG_DIR:-${LLAMACPP_DATA_ROOT}/logs}"
   # shellcheck disable=SC2034  # used by scripts that source this file
-  HF_HOME_DIR="${HF_HOME_DIR:-${DEVSTRAL_DATA_ROOT}/hf}"
+  HF_HOME_DIR="${HF_HOME_DIR:-${LLAMACPP_DATA_ROOT}/hf}"
   # shellcheck disable=SC2034  # used by scripts that source this file
-  LLAMACPP_HOME="${LLAMACPP_HOME:-${AGAI_ROOT}/bin/devstral}"
+  LLAMACPP_HOME="${LLAMACPP_HOME:-${AGAI_ROOT}/bin/llama.cpp}"
   # shellcheck disable=SC2034  # used by scripts that source this file
-  LLAMACPP_LIB_ROOT="${LLAMACPP_LIB_ROOT:-${AGAI_ROOT}/usr/lib/devstral/llama.cpp}"
+  LLAMACPP_LIB_ROOT="${LLAMACPP_LIB_ROOT:-${AGAI_ROOT}/usr/lib/llama.cpp}"
   # shellcheck disable=SC2034  # used by scripts that source this file
-  LLAMACPP_CACHE_ROOT="${LLAMACPP_CACHE_ROOT:-${DEVSTRAL_DATA_ROOT}/llama.cpp/models}"
+  LLAMACPP_CACHE_ROOT="${LLAMACPP_CACHE_ROOT:-${LLAMACPP_DATA_ROOT}/models}"
 else
   RUN_DIR="${RUN_DIR:-${REPO_ROOT}/.run}"
   LOG_DIR="${LOG_DIR:-${RUN_DIR}}"

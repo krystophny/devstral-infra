@@ -22,7 +22,7 @@ def cache_root() -> Path:
         return Path(explicit).expanduser()
     agai_root = os.environ.get("AGAI_ROOT", "").strip() or default_agai_root()
     if agai_root:
-        return Path(agai_root) / "data" / "devstral" / "llama.cpp" / "models"
+        return Path(agai_root) / "data" / "llama.cpp" / "models"
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Caches" / "llama.cpp"
     return Path.home() / ".cache" / "llama.cpp"
