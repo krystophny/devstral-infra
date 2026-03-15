@@ -36,6 +36,10 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec("qwen3.5-122b-a10b", "qwen", "lmstudio-community/Qwen3.5-122B-A10B-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("gpt-oss-20b", "gpt-oss", "ggml-org/gpt-oss-20b-GGUF", ("*mxfp4*.gguf",), True),
     ModelSpec("gpt-oss-120b", "gpt-oss", "ggml-org/gpt-oss-120b-GGUF", ("*mxfp4*.gguf",), True),
+    ModelSpec("nemotron-120b-a12b", "nemotron", "lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("qwen3-coder-next", "qwen", "lmstudio-community/Qwen3-Coder-Next-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("devstral-small-2-24b", "devstral", "lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("devstral-2-123b", "devstral", "lmstudio-community/Devstral-2-123B-Instruct-2512-GGUF", ("*Q8_0*.gguf",), True),
 )
 
 MODEL_BY_ALIAS = {model.alias: model for model in MODEL_SPECS}
