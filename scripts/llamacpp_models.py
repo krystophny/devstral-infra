@@ -12,7 +12,25 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
-CACHE_ROOT = Path.home() / "Library" / "Caches" / "llama.cpp"
+def default_agai_root() -> str:
+    if sys.platform.startswith("linux") and Path("/temp/AG-AI").exists():
+        return "/temp/AG-AI"
+    return ""
+
+
+def cache_root() -> Path:
+    explicit = os.environ.get("LLAMACPP_CACHE_ROOT", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    agai_root = os.environ.get("AGAI_ROOT", "").strip() or default_agai_root()
+    if agai_root:
+        return Path(agai_root) / "data" / "devstral" / "llama.cpp" / "models"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "llama.cpp"
+    return Path.home() / ".cache" / "llama.cpp"
+
+
+CACHE_ROOT = cache_root()
 
 
 @dataclass(frozen=True)
@@ -35,19 +53,34 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec("qwen3.5-4b", "qwen", "lmstudio-community/Qwen3.5-4B-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("qwen3.5-9b", "qwen", "lmstudio-community/Qwen3.5-9B-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("qwen3.5-27b", "qwen", "lmstudio-community/Qwen3.5-27B-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("qwen3.5-27b-q4km", "qwen", "lmstudio-community/Qwen3.5-27B-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("qwen3.5-35b-a3b", "qwen", "lmstudio-community/Qwen3.5-35B-A3B-GGUF", ("*Q8_0*.gguf",), True, True),
+    ModelSpec("qwen3.5-35b-a3b-q4km", "qwen", "unsloth/Qwen3.5-35B-A3B-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("qwen3.5-122b-a10b", "qwen", "lmstudio-community/Qwen3.5-122B-A10B-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("gpt-oss-20b", "gpt-oss", "ggml-org/gpt-oss-20b-GGUF", ("*mxfp4*.gguf",), True),
     ModelSpec("gpt-oss-120b", "gpt-oss", "ggml-org/gpt-oss-120b-GGUF", ("*mxfp4*.gguf",), True),
     ModelSpec("nemotron-120b-a12b", "nemotron", "lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("qwen3-coder-next", "qwen", "lmstudio-community/Qwen3-Coder-Next-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("qwen3-coder-30b-a3b", "qwen", "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("qwen3-coder-30b-a3b-q4km", "qwen", "Qwen/Qwen3-Coder-30B-Instruct-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("devstral-small-2-24b", "devstral", "lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("devstral-small-2-24b-q4km", "devstral", "mistralai/Devstral-Small-2-24B-Instruct-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("devstral-2-123b", "devstral", "lmstudio-community/Devstral-2-123B-Instruct-2512-GGUF", ("*Q8_0*.gguf",), True),
 )
 
 MODEL_BY_ALIAS = {model.alias: model for model in MODEL_SPECS}
 KEEP_DIRS = {"gguf-headers"}
+AGAI_SUPPORTED_ALIASES = (
+    "qwen3.5-0.8b",
+    "qwen3.5-2b",
+    "qwen3.5-4b",
+    "qwen3.5-9b",
+    "gpt-oss-20b",
+    "devstral-small-2-24b-q4km",
+    "qwen3.5-27b-q4km",
+    "qwen3-coder-30b-a3b-q4km",
+    "qwen3.5-35b-a3b-q4km",
+)
 
 
 def find_cli() -> str:
@@ -63,6 +96,8 @@ def selected_models(mode: str, aliases: list[str]) -> list[ModelSpec]:
         return [MODEL_BY_ALIAS[alias] for alias in aliases]
     if mode == "benchmark":
         return [model for model in MODEL_SPECS if model.benchmark_enabled]
+    if mode == "agai":
+        return [MODEL_BY_ALIAS[alias] for alias in AGAI_SUPPORTED_ALIASES]
     if mode == "qwen":
         return [model for model in MODEL_SPECS if model.family == "qwen"]
     if mode == "gpt-oss":
@@ -200,12 +235,12 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     inventory_parser = sub.add_parser("inventory")
-    inventory_parser.add_argument("--mode", default="all", choices=("all", "benchmark", "qwen", "gpt-oss"))
+    inventory_parser.add_argument("--mode", default="all", choices=("all", "benchmark", "agai", "qwen", "gpt-oss"))
     inventory_parser.add_argument("--json", action="store_true")
     inventory_parser.add_argument("aliases", nargs="*")
 
     prefetch_parser = sub.add_parser("prefetch")
-    prefetch_parser.add_argument("--mode", default="benchmark", choices=("all", "benchmark", "qwen", "gpt-oss"))
+    prefetch_parser.add_argument("--mode", default="benchmark", choices=("all", "benchmark", "agai", "qwen", "gpt-oss"))
     prefetch_parser.add_argument("aliases", nargs="*")
 
     sub.add_parser("cleanup")
