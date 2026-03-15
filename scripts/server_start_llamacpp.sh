@@ -114,6 +114,10 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
         gpt-oss-20b) HF_MODEL="ggml-org/gpt-oss-20b-GGUF" ;;
         gpt-oss-120b) HF_MODEL="ggml-org/gpt-oss-120b-GGUF" ;;
+        nemotron-120b-a12b) HF_MODEL="lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF:Q8_0" ;;
+        qwen3-coder-next) HF_MODEL="lmstudio-community/Qwen3-Coder-Next-GGUF:Q8_0" ;;
+        devstral-small-2-24b) HF_MODEL="lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF:Q8_0" ;;
+        devstral-2-123b) HF_MODEL="lmstudio-community/Devstral-2-123B-Instruct-2512-GGUF:Q8_0" ;;
         *)
           if [[ "${usable_mb}" -ge 180000 ]]; then
             HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0"
