@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/_common.sh"
 
 LLAMACPP_VERSION="${LLAMACPP_VERSION:-latest}"
 LLAMACPP_GIT_REF="${LLAMACPP_GIT_REF:-master}"
+LLAMACPP_GIT_REMOTE_URL="${LLAMACPP_GIT_REMOTE_URL:-https://github.com/krystophny/llama.cpp}"
 LLAMACPP_HOME_DIR="${LLAMACPP_HOME}"
 LLAMACPP_BUILD_ROOT="${LLAMACPP_LIB_ROOT}"
 LLAMACPP_SRC_DIR="${LLAMACPP_SRC_DIR:-}"
@@ -99,10 +100,14 @@ setup_cuda_from_source() {
 
   if [[ -d "${LLAMACPP_SRC_DIR}/.git" ]]; then
     echo "Refreshing source checkout in ${LLAMACPP_SRC_DIR}..."
+    current_remote="$(git -C "${LLAMACPP_SRC_DIR}" remote get-url origin 2>/dev/null || true)"
+    if [[ -n "${current_remote}" && "${current_remote}" != "${LLAMACPP_GIT_REMOTE_URL}" ]]; then
+      git -C "${LLAMACPP_SRC_DIR}" remote set-url origin "${LLAMACPP_GIT_REMOTE_URL}"
+    fi
     git -C "${LLAMACPP_SRC_DIR}" fetch --tags origin
   else
-    echo "Cloning upstream llama.cpp into ${LLAMACPP_SRC_DIR}..."
-    git clone https://github.com/ggml-org/llama.cpp "${LLAMACPP_SRC_DIR}"
+    echo "Cloning llama.cpp into ${LLAMACPP_SRC_DIR}..."
+    git clone "${LLAMACPP_GIT_REMOTE_URL}" "${LLAMACPP_SRC_DIR}"
   fi
 
   ref="${LLAMACPP_GIT_REF}"
@@ -163,6 +168,7 @@ setup_cuda_from_source() {
   cat <<EOF
 OK (llama.cpp CUDA build installed)
 - Source: ${LLAMACPP_SRC_DIR}
+- Remote: ${LLAMACPP_GIT_REMOTE_URL}
 - Ref: ${checkout_ref}
 - Commit: ${commit}
 - Install root: ${install_root}
