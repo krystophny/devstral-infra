@@ -139,9 +139,9 @@ if [[ -z "${MODEL_PATH}" ]]; then
         nemotron-120b-a12b) HF_MODEL="lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF:Q8_0" ;;
         qwen3-coder-next) HF_MODEL="lmstudio-community/Qwen3-Coder-Next-GGUF:Q8_0" ;;
         qwen3-coder-30b-a3b) HF_MODEL="lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q8_0" ;;
-        qwen3-coder-30b-a3b-q4km) HF_MODEL="Qwen/Qwen3-Coder-30B-Instruct-GGUF:Q4_K_M" ;;
+        qwen3-coder-30b-a3b-q4km) HF_MODEL="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M" ;;
         devstral-small-2-24b) HF_MODEL="lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF:Q8_0" ;;
-        devstral-small-2-24b-q4km) HF_MODEL="mistralai/Devstral-Small-2-24B-Instruct-GGUF:Q4_K_M" ;;
+        devstral-small-2-24b-q4km) HF_MODEL="unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF:Q4_K_M" ;;
         devstral-2-123b) HF_MODEL="lmstudio-community/Devstral-2-123B-Instruct-2512-GGUF:Q8_0" ;;
         *)
           if [[ "${usable_mb}" -ge 180000 ]]; then

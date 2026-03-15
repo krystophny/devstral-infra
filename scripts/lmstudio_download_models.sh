@@ -13,10 +13,10 @@ mkdir -p "${MODELS_DIR}"
 # Format: name|org/repo|filename|size_description
 MODELS=(
     "glm-4.7-flash|unsloth/GLM-4.7-Flash-GGUF|GLM-4.7-Flash-Q4_K_M.gguf|18GB MoE with MLA"
-    "devstral-small-2|mistralai/Devstral-Small-2-24B-Instruct-GGUF|Devstral-Small-2-24B-Instruct-Q4_K_M.gguf|15GB dense"
+    "devstral-small-2|unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF|Devstral-Small-2-24B-Instruct-2512-Q4_K_M.gguf|15GB dense"
     "gpt-oss-20b|ggml-org/gpt-oss-20b-GGUF|gpt-oss-20b-Q4_K_M.gguf|12GB MoE"
     "gpt-oss-120b|ggml-org/gpt-oss-120b-GGUF|gpt-oss-120b-Q4_K_M.gguf|70GB MoE"
-    "qwen3-30b-coder|Qwen/Qwen3-Coder-30B-Instruct-GGUF|Qwen3-Coder-30B-Instruct-Q4_K_M.gguf|18GB"
+    "qwen3-30b-coder|unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF|Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf|18GB"
 )
 
 echo "LM Studio Model Downloader (Direct HuggingFace)"
