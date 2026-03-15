@@ -39,7 +39,7 @@ EOF
   if [[ -f "${backup_dir}/llamacpp-local.pid" ]]; then mv "${backup_dir}/llamacpp-local.pid" "${pid_file}"; fi
   if [[ -f "${backup_dir}/llamacpp-local.port" ]]; then mv "${backup_dir}/llamacpp-local.port" "${port_file}"; fi
 
-  if [[ "${output}" == *"-c 262144"* && \
+  if [[ "${output}" == *"-c 50000"* && \
         "${output}" == *"--ctx-checkpoints 64"* && \
         "${output}" == *"--checkpoint-every-n-tokens 4096"* && \
         "${output}" == *"-b 2048"* && \
@@ -69,7 +69,7 @@ test_opencode_config() {
 
   if grep -q '"model": "llamacpp/qwen"' "${config_path}" && \
      grep -q '"permission": "allow"' "${config_path}" && \
-     grep -q '"context": 262144' "${config_path}" && \
+     grep -q '"context": 50000' "${config_path}" && \
      grep -q '"output": 32768' "${config_path}" && \
      grep -q '"temperature": 0.6' "${config_path}" && \
      grep -q '"top_p": 0.95' "${config_path}" && \
@@ -129,7 +129,7 @@ test_qwencode_config() {
 
   if grep -q '"id": "qwen"' "${config}" && \
      grep -q 'http://127.0.0.1:8080/v1' "${config}" && \
-     grep -q '"contextWindowSize": 262144' "${config}" && \
+     grep -q '"contextWindowSize": 50000' "${config}" && \
      grep -q '"temperature": 0.6' "${config}" && \
      grep -q '"selectedType": "openai"' "${config}" && \
      grep -q '"approvalMode": "yolo"' "${config}"; then
@@ -199,15 +199,24 @@ import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
 models = data.get("models", [])
-if len(models) != 2:
-    print(f"FAIL: expected 2 models, got {len(models)}")
+if len(models) < 9:
+    print(f"FAIL: expected at least 9 models, got {len(models)}")
     sys.exit(1)
-slugs = [m["slug"] for m in models]
-if "Qwen3.5-122B-A10B" not in slugs:
-    print(f"FAIL: missing Qwen3.5-122B-A10B slug, got {slugs}")
-    sys.exit(1)
-if "Qwen3.5-9B" not in slugs:
-    print(f"FAIL: missing Qwen3.5-9B slug, got {slugs}")
+entries = {m["slug"]: m for m in models}
+required = {
+    "Qwen3.5-0.8B": 262144,
+    "Qwen3.5-2B": 262144,
+    "Qwen3.5-4B": 262144,
+    "Qwen3.5-9B": 262144,
+    "GPT-OSS-20B": 131072,
+    "Devstral-Small-2-24B-Instruct-2512": 57344,
+    "Qwen3.5-27B": 65536,
+    "Qwen3-Coder-30B-A3B-Instruct": 50000,
+    "Qwen3.5-35B-A3B": 50000,
+}
+missing = [slug for slug in required if slug not in entries]
+if missing:
+    print(f"FAIL: missing required slugs: {missing}")
     sys.exit(1)
 for m in models:
     for field in ("base_instructions", "context_window", "truncation_policy",
@@ -215,23 +224,19 @@ for m in models:
         if field not in m:
             print(f"FAIL: model {m['slug']} missing field {field}")
             sys.exit(1)
-local = [m for m in models if m["slug"] == "Qwen3.5-122B-A10B"][0]
-fast = [m for m in models if m["slug"] == "Qwen3.5-9B"][0]
-if local["context_window"] != 262144:
-    print(f"FAIL: local context_window={local['context_window']}, expected 262144")
-    sys.exit(1)
-if fast["context_window"] != 32768:
-    print(f"FAIL: fast context_window={fast['context_window']}, expected 32768")
-    sys.exit(1)
-if local["truncation_policy"]["mode"] != "tokens":
-    print(f"FAIL: truncation mode={local['truncation_policy']['mode']}, expected tokens")
+for slug, ctx in required.items():
+    if entries[slug]["context_window"] != ctx:
+        print(f"FAIL: {slug} context_window={entries[slug]['context_window']}, expected {ctx}")
+        sys.exit(1)
+if entries["Qwen3.5-35B-A3B"]["truncation_policy"]["mode"] != "tokens":
+    print(f"FAIL: truncation mode={entries['Qwen3.5-35B-A3B']['truncation_policy']['mode']}, expected tokens")
     sys.exit(1)
 print("OK")
 PY
   )"
 
   if [[ "${valid}" == "OK" ]]; then
-    echo "PASS: model catalog has correct slugs, context windows, and required fields"
+    echo "PASS: model catalog has the supported AG-AI local models with correct context windows"
   else
     echo "FAIL: ${valid}"
     cat "${catalog_path}"
