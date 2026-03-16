@@ -2,6 +2,11 @@
 
 Cross-platform local inference server for coding AI models.
 
+License: [MIT](LICENSE)
+
+> **Disclaimer**: This is experimental, vibe-coded infrastructure. No warranty
+> of any kind. Use at your own risk. Not affiliated with Mistral AI.
+
 - **Auto-detection**: Automatically selects optimal model and configuration based on hardware
 - **Cross-platform**: macOS (LM Studio + MLX), Linux (vLLM + CUDA/CPU), Windows (WSL)
 - **Tool calling**: Full tool use support for coding assistants
