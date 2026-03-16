@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Configure Codex CLI for local llama.cpp server with two profiles:
 #   local (thinking/coding on port 8080) and fast (non-thinking on port 8081).
-# Also generates model catalog JSON to eliminate metadata warnings.
+# Also generates a local model catalog JSON for reference, but does not
+# override Codex's main catalog lookup. Overriding the global catalog with a
+# local-only file breaks cloud model metadata resolution (for example
+# `gpt-5.4`).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -106,9 +109,9 @@ PY
 
 echo "catalog: ${CATALOG_PATH}"
 
-# Update only the managed local-provider/profile/catalog entries. Preserve the
-# rest of the user's Codex config verbatim.
-python3 - "${CONFIG_PATH}" "${CATALOG_PATH}" "${LOCAL_API_BASE}" "${FAST_API_BASE}" "${LOCAL_MODEL}" "${FAST_MODEL}" <<'PY'
+# Update only the managed local-provider/profile entries. Preserve the rest of
+# the user's Codex config verbatim.
+python3 - "${CONFIG_PATH}" "${LOCAL_API_BASE}" "${FAST_API_BASE}" "${LOCAL_MODEL}" "${FAST_MODEL}" <<'PY'
 from __future__ import annotations
 
 import re
@@ -116,15 +119,13 @@ import sys
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
-catalog_path = sys.argv[2]
-local_api_base = sys.argv[3]
-fast_api_base = sys.argv[4]
-local_model = sys.argv[5]
-fast_model = sys.argv[6]
+local_api_base = sys.argv[2]
+fast_api_base = sys.argv[3]
+local_model = sys.argv[4]
+fast_model = sys.argv[5]
 
 text = config_path.read_text() if config_path.exists() else ""
 
-catalog_line = f'model_catalog_json = "{catalog_path}"'
 provider_local = (
     '[model_providers.local]\n'
     'name = "Local llama.cpp"\n'
@@ -170,7 +171,13 @@ def upsert_table(content: str, header: str, block: str) -> str:
     return block
 
 
-text = upsert_scalar(text, 'model_catalog_json', catalog_line)
+def drop_scalar(content: str, key: str) -> str:
+    pattern = re.compile(rf'(?m)^{re.escape(key)}\s*=\s*.*(?:\n)?')
+    content = pattern.sub('', content)
+    return re.sub(r'\n{3,}', '\n\n', content).lstrip('\n')
+
+
+text = drop_scalar(text, 'model_catalog_json')
 text = upsert_table(text, 'model_providers.local', provider_local)
 text = upsert_table(text, 'model_providers.fast', provider_fast)
 text = upsert_table(text, 'profiles.local', profile_local)
@@ -180,10 +187,11 @@ PY
 
 echo "Configured Codex CLI for local llama.cpp:"
 echo "- config: ${CONFIG_PATH}"
-echo "- catalog: ${CATALOG_PATH}"
+echo "- local catalog (reference only): ${CATALOG_PATH}"
 echo "- profile 'local': ${LOCAL_MODEL} at ${LOCAL_API_BASE} (${LOCAL_CONTEXT} ctx)"
 echo "- profile 'fast': ${FAST_MODEL} at ${FAST_API_BASE} (${FAST_CONTEXT} ctx)"
 echo "- web_search: disabled (llama.cpp does not support Codex web_search tool)"
+echo "- global model catalog: preserved (no model_catalog_json override)"
 echo ""
 echo "Usage:"
 echo "  1. Start servers: scripts/server_start_llamacpp.sh local"
