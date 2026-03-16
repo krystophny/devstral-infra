@@ -39,7 +39,7 @@ fi
 
 BASE_INSTRUCTIONS="You are a helpful coding assistant. Use exec_command for shell commands and apply_patch for file edits. Do not use MCP or filesystem tools."
 
-# Generate model catalog JSON
+# Generate model catalog JSON.
 python3 - "${CATALOG_PATH}" "${LOCAL_MODEL}" "${LOCAL_CONTEXT}" "${FAST_MODEL}" "${FAST_CONTEXT}" "${BASE_INSTRUCTIONS}" "${SUPPORTED_LOCAL_MODELS_JSON}" <<'PY'
 import json
 import sys
@@ -99,99 +99,84 @@ if fast_model not in seen:
     seen.add(fast_model)
     catalog_models.append(model_entry(fast_model, f"{fast_model} (local fast)", fast_ctx, "low", fast_levels))
 
-catalog = {"models": catalog_models}
-
 with open(path, "w") as f:
-    json.dump(catalog, f, indent=2)
+    json.dump({"models": catalog_models}, f, indent=2)
     f.write("\n")
 PY
 
 echo "catalog: ${CATALOG_PATH}"
 
-# Note: we do NOT strip top-level model/model_reasoning_effort — those are the
-# user's default OpenAI settings.  Profiles are selected explicitly with -p.
+# Update only the managed local-provider/profile/catalog entries. Preserve the
+# rest of the user's Codex config verbatim.
+python3 - "${CONFIG_PATH}" "${CATALOG_PATH}" "${LOCAL_API_BASE}" "${FAST_API_BASE}" "${LOCAL_MODEL}" "${FAST_MODEL}" <<'PY'
+from __future__ import annotations
 
-# Generate config blocks
-CATALOG_BEGIN="# BEGIN DEVSTRAL MODEL CATALOG"
-CATALOG_END="# END DEVSTRAL MODEL CATALOG"
-CATALOG_BLOCK="$(cat <<EOF
-${CATALOG_BEGIN}
-model_catalog_json = "${CATALOG_PATH}"
-${CATALOG_END}
-EOF
-)"
-
-BEGIN_MARKER="# BEGIN DEVSTRAL LOCAL MODELS"
-END_MARKER="# END DEVSTRAL LOCAL MODELS"
-BLOCK="$(cat <<EOF
-${BEGIN_MARKER}
-[model_providers.local]
-name = "Local llama.cpp"
-base_url = "${LOCAL_API_BASE}"
-wire_api = "responses"
-
-[model_providers.fast]
-name = "Fast llama.cpp"
-base_url = "${FAST_API_BASE}"
-wire_api = "responses"
-
-[profiles.local]
-model_provider = "local"
-model = "${LOCAL_MODEL}"
-web_search = "disabled"
-
-[profiles.fast]
-model_provider = "fast"
-model = "${FAST_MODEL}"
-web_search = "disabled"
-${END_MARKER}
-EOF
-)"
-
-replace_block() {
-    local path="$1" begin="$2" end="$3" new_block="$4"
-    python3 - "$path" "$begin" "$end" "$new_block" <<'PY'
+import re
 import sys
-path, begin, end, new_block = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-with open(path) as f:
-    content = f.read()
-start = content.index(begin)
-stop = content.index(end) + len(end)
-tail = content[stop:]
-content = content[:start] + new_block + tail
-with open(path, "w") as f:
-    f.write(content)
-PY
-}
+from pathlib import Path
 
-prepend_block() {
-    local path="$1" new_block="$2"
-    python3 - "$path" "$new_block" <<'PY'
-import sys
-path, new_block = sys.argv[1], sys.argv[2]
-with open(path) as f:
-    content = f.read()
-with open(path, "w") as f:
-    f.write(new_block)
-    f.write("\n\n")
-    f.write(content)
-PY
-}
+config_path = Path(sys.argv[1])
+catalog_path = sys.argv[2]
+local_api_base = sys.argv[3]
+fast_api_base = sys.argv[4]
+local_model = sys.argv[5]
+fast_model = sys.argv[6]
 
-if [[ -f "${CONFIG_PATH}" ]]; then
-    if grep -q "${CATALOG_BEGIN}" "${CONFIG_PATH}"; then
-        replace_block "${CONFIG_PATH}" "${CATALOG_BEGIN}" "${CATALOG_END}" "${CATALOG_BLOCK}"
-    else
-        prepend_block "${CONFIG_PATH}" "${CATALOG_BLOCK}"
-    fi
-    if grep -q "${BEGIN_MARKER}" "${CONFIG_PATH}"; then
-        replace_block "${CONFIG_PATH}" "${BEGIN_MARKER}" "${END_MARKER}" "${BLOCK}"
-    else
-        printf '\n%s\n' "${BLOCK}" >> "${CONFIG_PATH}"
-    fi
-else
-    printf '%s\n\n%s\n' "${CATALOG_BLOCK}" "${BLOCK}" > "${CONFIG_PATH}"
-fi
+text = config_path.read_text() if config_path.exists() else ""
+
+catalog_line = f'model_catalog_json = "{catalog_path}"'
+provider_local = (
+    '[model_providers.local]\n'
+    'name = "Local llama.cpp"\n'
+    f'base_url = "{local_api_base}"\n'
+    'wire_api = "responses"\n'
+)
+provider_fast = (
+    '[model_providers.fast]\n'
+    'name = "Fast llama.cpp"\n'
+    f'base_url = "{fast_api_base}"\n'
+    'wire_api = "responses"\n'
+)
+profile_local = (
+    '[profiles.local]\n'
+    'model_provider = "local"\n'
+    f'model = "{local_model}"\n'
+    'web_search = "disabled"\n'
+)
+profile_fast = (
+    '[profiles.fast]\n'
+    'model_provider = "fast"\n'
+    f'model = "{fast_model}"\n'
+    'web_search = "disabled"\n'
+)
+
+
+def upsert_scalar(content: str, key: str, replacement: str) -> str:
+    pattern = re.compile(rf'(?m)^{re.escape(key)}\s*=\s*.*$')
+    if pattern.search(content):
+        return pattern.sub(replacement, content, count=1)
+    return (replacement + "\n\n" + content) if content.strip() else (replacement + "\n")
+
+
+def upsert_table(content: str, header: str, block: str) -> str:
+    pattern = re.compile(rf'(?ms)^\[{re.escape(header)}\]\n.*?(?=^\[|\Z)')
+    block = block.rstrip() + "\n\n"
+    if pattern.search(content):
+        return pattern.sub(block, content, count=1)
+    if content and not content.endswith("\n"):
+        content += "\n"
+    if content.strip():
+        return content.rstrip() + "\n\n" + block
+    return block
+
+
+text = upsert_scalar(text, 'model_catalog_json', catalog_line)
+text = upsert_table(text, 'model_providers.local', provider_local)
+text = upsert_table(text, 'model_providers.fast', provider_fast)
+text = upsert_table(text, 'profiles.local', profile_local)
+text = upsert_table(text, 'profiles.fast', profile_fast)
+config_path.write_text(text.rstrip() + "\n")
+PY
 
 echo "Configured Codex CLI for local llama.cpp:"
 echo "- config: ${CONFIG_PATH}"
