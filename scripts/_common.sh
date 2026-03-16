@@ -2,12 +2,60 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_DIR="${REPO_ROOT}/.run"
-# shellcheck disable=SC2034  # used by scripts that source this file
-HF_HOME_DIR="${REPO_ROOT}/.hf"
-VENV_DIR="${REPO_ROOT}/.venv"
 
-mkdir -p "${RUN_DIR}"
+default_agai_root() {
+  case "$(uname -s)" in
+    Linux)
+      if [[ -d "/temp/AG-AI" ]]; then
+        printf '%s' "/temp/AG-AI"
+      fi
+      ;;
+  esac
+}
+
+default_llamacpp_cache_root() {
+  case "$(uname -s)" in
+    Darwin)
+      printf '%s' "${HOME}/Library/Caches/llama.cpp"
+      ;;
+    *)
+      printf '%s' "${HOME}/.cache/llama.cpp"
+      ;;
+  esac
+}
+
+AGAI_ROOT="${AGAI_ROOT:-$(default_agai_root)}"
+if [[ -n "${AGAI_ROOT}" ]]; then
+  LLAMACPP_DATA_ROOT="${LLAMACPP_DATA_ROOT:-${AGAI_ROOT}/data/llama.cpp}"
+  RUN_DIR="${RUN_DIR:-${LLAMACPP_DATA_ROOT}/run}"
+  LOG_DIR="${LOG_DIR:-${LLAMACPP_DATA_ROOT}/logs}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  HF_HOME_DIR="${HF_HOME_DIR:-${LLAMACPP_DATA_ROOT}/hf}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  LLAMACPP_HOME="${LLAMACPP_HOME:-${AGAI_ROOT}/bin/llama.cpp}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  LLAMACPP_LIB_ROOT="${LLAMACPP_LIB_ROOT:-${AGAI_ROOT}/usr/lib/llama.cpp}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  LLAMACPP_CACHE_ROOT="${LLAMACPP_CACHE_ROOT:-${LLAMACPP_DATA_ROOT}/models}"
+else
+  RUN_DIR="${RUN_DIR:-${REPO_ROOT}/.run}"
+  LOG_DIR="${LOG_DIR:-${RUN_DIR}}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  HF_HOME_DIR="${HF_HOME_DIR:-${REPO_ROOT}/.hf}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  LLAMACPP_HOME="${LLAMACPP_HOME:-${HOME}/.local/llama.cpp}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  LLAMACPP_LIB_ROOT="${LLAMACPP_LIB_ROOT:-${LLAMACPP_HOME}}"
+  # shellcheck disable=SC2034  # used by scripts that source this file
+  LLAMACPP_CACHE_ROOT="${LLAMACPP_CACHE_ROOT:-$(default_llamacpp_cache_root)}"
+fi
+
+# Current llama.cpp -hf downloads respect LLAMA_CACHE rather than HF_HUB_CACHE.
+LLAMA_CACHE="${LLAMA_CACHE:-${LLAMACPP_CACHE_ROOT}}"
+
+VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv}"
+
+mkdir -p "${RUN_DIR}" "${LOG_DIR}"
 
 die() {
   echo "error: $*" >&2
@@ -20,6 +68,50 @@ warn() {
 
 have() {
   command -v "$1" >/dev/null 2>&1
+}
+
+default_local_agent_context() {
+  local platform="unknown"
+  case "$(uname -s)" in
+    Darwin) platform="mac" ;;
+    Linux)
+      if grep -qi microsoft /proc/version 2>/dev/null; then
+        platform="wsl"
+      else
+        platform="linux"
+      fi
+      ;;
+  esac
+
+  if [[ -n "${AGAI_ROOT}" && ( "${platform}" == "linux" || "${platform}" == "wsl" ) ]] && have nvidia-smi && nvidia-smi >/dev/null 2>&1; then
+    printf '%s' "50000"
+  else
+    printf '%s' "262144"
+  fi
+}
+
+default_fast_agent_context() {
+  printf '%s' "32768"
+}
+
+default_local_model_alias() {
+  local platform="unknown"
+  case "$(uname -s)" in
+    Darwin) platform="mac" ;;
+    Linux)
+      if grep -qi microsoft /proc/version 2>/dev/null; then
+        platform="wsl"
+      else
+        platform="linux"
+      fi
+      ;;
+  esac
+
+  if [[ -n "${AGAI_ROOT}" && ( "${platform}" == "linux" || "${platform}" == "wsl" ) ]] && have nvidia-smi && nvidia-smi >/dev/null 2>&1; then
+    printf '%s' "qwen3.5-35b-a3b-q4km"
+  else
+    printf '%s' "qwen3.5-35b-a3b"
+  fi
 }
 
 detect_platform() {

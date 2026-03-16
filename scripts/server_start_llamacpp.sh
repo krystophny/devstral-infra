@@ -49,28 +49,40 @@ instance_var() {
 case "${INSTANCE}" in
   local)
     DEFAULT_PORT="8080"
-    DEFAULT_MODEL_ALIAS="qwen3.5-35b-a3b"
-    DEFAULT_CONTEXT="262144"
+    DEFAULT_MODEL_ALIAS="$(default_local_model_alias)"
+    DEFAULT_CONTEXT="$(default_local_agent_context)"
     DEFAULT_THINKING="true"
     ;;
   fast)
     DEFAULT_PORT="8081"
     DEFAULT_MODEL_ALIAS="qwen3.5-9b"
-    DEFAULT_CONTEXT="32768"
+    DEFAULT_CONTEXT="$(default_fast_agent_context)"
     DEFAULT_THINKING="false"
     ;;
 esac
 
-SIBLING_LLAMA_SERVER="/Users/ert/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
-LLAMACPP_DIR="${HOME}/.local/llama.cpp"
+SIBLING_LLAMA_SERVER="${REPO_ROOT}/../llama.cpp-dev/llama.cpp/build/bin/llama-server"
+HOME_LLAMA_SERVER="${HOME}/.local/llama.cpp/llama-server"
 if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
   LLAMA_SERVER="${LLAMACPP_SERVER_BIN}"
 elif [[ -x "${SIBLING_LLAMA_SERVER}" ]]; then
   LLAMA_SERVER="${SIBLING_LLAMA_SERVER}"
+elif [[ -x "${LLAMACPP_HOME}/llama-server" ]]; then
+  LLAMA_SERVER="${LLAMACPP_HOME}/llama-server"
+elif [[ -x "${HOME_LLAMA_SERVER}" ]]; then
+  LLAMA_SERVER="${HOME_LLAMA_SERVER}"
 else
-  LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"
+  LLAMA_SERVER="${LLAMACPP_HOME}/llama-server"
 fi
-LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER}")" && pwd)"
+LLAMA_SERVER_REAL="$(
+  python3 - "${LLAMA_SERVER}" <<'PY'
+import os
+import sys
+
+print(os.path.realpath(sys.argv[1]))
+PY
+)"
+LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER_REAL}")" && pwd)"
 MODELS_SCRIPT="${SCRIPT_DIR}/llamacpp_models.py"
 
 # Check if llama.cpp is installed
@@ -78,13 +90,21 @@ if [[ ! -x "${LLAMA_SERVER}" ]]; then
   die "llama.cpp not installed. Run: scripts/setup_llamacpp.sh"
 fi
 
-export DYLD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+if [[ -d "${LLAMA_SERVER_DIR}/../lib" ]]; then
+  export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}:${LLAMA_SERVER_DIR}/../lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+  export DYLD_LIBRARY_PATH="${LLAMA_SERVER_DIR}:${LLAMA_SERVER_DIR}/../lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+  SERVICE_LIBRARY_PATH="${LLAMA_SERVER_DIR}:${LLAMA_SERVER_DIR}/../lib"
+else
+  export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+  export DYLD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+  SERVICE_LIBRARY_PATH="${LLAMA_SERVER_DIR}"
+fi
 
 HOST="${DEVSTRAL_HOST:-127.0.0.1}"
 PORT="${DEVSTRAL_PORT:-${DEFAULT_PORT}}"
 
 PID_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.pid"
-LOG_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.log"
+LOG_FILE="${LOG_DIR}/llamacpp-${INSTANCE}.log"
 PORT_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.port"
 START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
 
@@ -110,14 +130,18 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-4b) HF_MODEL="lmstudio-community/Qwen3.5-4B-GGUF:Q8_0" ;;
         qwen3.5-9b) HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q8_0" ;;
         qwen3.5-27b) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q8_0" ;;
+        qwen3.5-27b-q4km) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q4_K_M" ;;
         qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
+        qwen3.5-35b-a3b-q4km) HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_M" ;;
         qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
         gpt-oss-20b) HF_MODEL="ggml-org/gpt-oss-20b-GGUF" ;;
         gpt-oss-120b) HF_MODEL="ggml-org/gpt-oss-120b-GGUF" ;;
         nemotron-120b-a12b) HF_MODEL="lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF:Q8_0" ;;
         qwen3-coder-next) HF_MODEL="lmstudio-community/Qwen3-Coder-Next-GGUF:Q8_0" ;;
         qwen3-coder-30b-a3b) HF_MODEL="lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q8_0" ;;
+        qwen3-coder-30b-a3b-q4km) HF_MODEL="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M" ;;
         devstral-small-2-24b) HF_MODEL="lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF:Q8_0" ;;
+        devstral-small-2-24b-q4km) HF_MODEL="unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF:Q4_K_M" ;;
         devstral-2-123b) HF_MODEL="lmstudio-community/Devstral-2-123B-Instruct-2512-GGUF:Q8_0" ;;
         *)
           if [[ "${usable_mb}" -ge 180000 ]]; then
@@ -366,7 +390,13 @@ Type=simple
 ExecStart=${exec_start_line}
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}
-Environment=LD_LIBRARY_PATH=${LLAMA_SERVER_DIR}
+Environment=LD_LIBRARY_PATH=${SERVICE_LIBRARY_PATH}
+Environment=DYLD_LIBRARY_PATH=${SERVICE_LIBRARY_PATH}
+Environment=HF_HOME=${HF_HOME_DIR}
+Environment=HF_HUB_CACHE=${LLAMACPP_CACHE_ROOT}
+Environment=HUGGINGFACE_HUB_CACHE=${LLAMACPP_CACHE_ROOT}
+Environment=LLAMACPP_CACHE_ROOT=${LLAMACPP_CACHE_ROOT}
+Environment=LLAMA_CACHE=${LLAMA_CACHE}
 
 [Install]
 WantedBy=default.target
