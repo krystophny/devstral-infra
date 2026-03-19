@@ -49,6 +49,18 @@ stop_instance() {
       return 0
     fi
     if [[ ! -f "${pid_file}" ]]; then
+      # Fallback: kill by port if PID file is missing but server is running
+      local port
+      if [[ "${inst}" == "local" ]]; then port=8080; else port=8081; fi
+      local orphan_pids
+      orphan_pids="$(lsof -ti ":${port}" 2>/dev/null || true)"
+      if [[ -n "${orphan_pids}" ]]; then
+        echo "stopping orphan llama.cpp [${inst}] on port ${port} (PID file missing)..."
+        echo "${orphan_pids}" | xargs kill -9 2>/dev/null || true
+        sleep 2
+        echo "stopped (orphan)"
+        return 0
+      fi
       echo "[${inst}] not running"
       return 0
     fi
