@@ -156,6 +156,15 @@ if [[ "${DRY_RUN}" != "true" && -f "${PID_FILE}" ]]; then
   fi
   rm -f "${PID_FILE}"
 fi
+# Safety: ensure port is free (kill orphans from stale PID files or crashed launchd)
+if [[ "${DRY_RUN}" != "true" ]]; then
+  orphan_pids="$(lsof -ti ":${PORT}" 2>/dev/null || true)"
+  if [[ -n "${orphan_pids}" ]]; then
+    echo "WARNING: port ${PORT} occupied by orphan process(es), killing..."
+    echo "${orphan_pids}" | xargs kill -9 2>/dev/null || true
+    sleep 2
+  fi
+fi
 # Use reasonable number of threads
 CPU_THREADS=$(( CPU_THREADS > 24 ? 24 : CPU_THREADS ))
 
