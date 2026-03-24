@@ -94,12 +94,12 @@ test_opencode_config() {
   local config_path="${TMPDIR}/opencode.json"
   mkdir -p "${home_dir}"
   HOME="${home_dir}" OPENCODE_CONFIG_PATH="${config_path}" bash "${REPO_ROOT}/scripts/opencode_set_vllm_mlx.sh" >/dev/null
-  if grep -q '"model": "localanthropic/qwen"' "${config_path}" && \
+  if grep -q '"model": "local/qwen"' "${config_path}" && \
      grep -q '"name": "vllm-mlx"' "${config_path}" && \
-     grep -q '"api": "anthropic"' "${config_path}" && \
+     grep -q '"npm": "@ai-sdk/openai"' "${config_path}" && \
      grep -q '"tool_call": true' "${config_path}" && \
      grep -q '"baseURL": "http://127.0.0.1:8080/v1"' "${config_path}"; then
-    echo "PASS: OpenCode config uses Anthropic-compatible local vllm-mlx"
+    echo "PASS: OpenCode config uses Responses-capable local vllm-mlx"
   else
     echo "FAIL: OpenCode config missing expected fields"
     cat "${config_path}"
