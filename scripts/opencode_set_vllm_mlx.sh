@@ -24,24 +24,26 @@ fi
 cat > "${CONFIG_PATH}" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "llamacpp/${MODEL_ID}",
+  "model": "localanthropic/${MODEL_ID}",
   "share": "disabled",
   "autoupdate": false,
   "permission": "allow",
   "experimental": {
     "openTelemetry": false
   },
-  "disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
+  "disabled_providers": ["exa", "openai", "google", "mistral", "groq", "xai", "ollama"],
   "provider": {
-    "llamacpp": {
-      "npm": "@ai-sdk/openai-compatible",
+    "localanthropic": {
+      "api": "anthropic",
       "name": "vllm-mlx",
       "options": {
-        "baseURL": "${API_BASE}"
+        "baseURL": "${API_BASE}",
+        "apiKey": "dummy"
       },
       "models": {
         "${MODEL_ID}": {
           "name": "${MODEL_ID}",
+          "tool_call": true,
           "limit": {
             "context": ${CONTEXT_SIZE},
             "output": ${OUTPUT_LIMIT}
@@ -63,5 +65,5 @@ EOF
 
 echo "Configured OpenCode for local vllm-mlx:"
 echo "- config: ${CONFIG_PATH}"
-echo "- model: llamacpp/${MODEL_ID}"
+echo "- model: localanthropic/${MODEL_ID}"
 echo "- api_base: ${API_BASE}"
