@@ -62,6 +62,21 @@ if [[ ! -x "${VLLM_MLX_PYTHON}" ]]; then
   die "missing python executable: ${VLLM_MLX_PYTHON}"
 fi
 
+ensure_cli_supports_served_model_name() {
+  local help_output
+  if ! help_output="$(
+    PYTHONPATH="${VLLM_MLX_REPO}" \
+    "${VLLM_MLX_PYTHON}" -m vllm_mlx.cli serve --help 2>&1
+  )"; then
+    die "failed to inspect vllm-mlx serve CLI at ${VLLM_MLX_REPO}: ${help_output}"
+  fi
+  if [[ "${help_output}" != *"--served-model-name"* ]]; then
+    die "vllm-mlx checkout at ${VLLM_MLX_REPO} does not support --served-model-name. Update to upstream main or newer (waybarrios/vllm-mlx#125)."
+  fi
+}
+
+ensure_cli_supports_served_model_name
+
 repo_id="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field repo_id)"
 tool_call_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field tool_call_parser)"
 reasoning_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field reasoning_parser)"
