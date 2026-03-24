@@ -24,7 +24,7 @@ fi
 cat > "${CONFIG_PATH}" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "localanthropic/${MODEL_ID}",
+  "model": "local/${MODEL_ID}",
   "share": "disabled",
   "autoupdate": false,
   "permission": "allow",
@@ -33,8 +33,8 @@ cat > "${CONFIG_PATH}" <<EOF
   },
   "disabled_providers": ["exa", "openai", "google", "mistral", "groq", "xai", "ollama"],
   "provider": {
-    "localanthropic": {
-      "api": "anthropic",
+    "local": {
+      "npm": "@ai-sdk/openai",
       "name": "vllm-mlx",
       "options": {
         "baseURL": "${API_BASE}",
@@ -65,5 +65,5 @@ EOF
 
 echo "Configured OpenCode for local vllm-mlx:"
 echo "- config: ${CONFIG_PATH}"
-echo "- model: localanthropic/${MODEL_ID}"
+echo "- model: local/${MODEL_ID}"
 echo "- api_base: ${API_BASE}"
