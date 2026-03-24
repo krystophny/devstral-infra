@@ -47,6 +47,47 @@ test_server_start_dry_run() {
   fi
 }
 
+test_server_start_requires_served_model_name_support() {
+  echo "TEST: vllm-mlx launcher fails fast without --served-model-name support"
+  local fake_python="${TMPDIR}/fake-vllm-python.sh"
+  local fake_repo="${TMPDIR}/fake-vllm-repo"
+  mkdir -p "${fake_repo}"
+  cat > "${fake_python}" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"-m vllm_mlx.cli serve --help"* ]]; then
+  cat <<'HELP'
+usage: cli.py serve [-h] [--host HOST] [--port PORT]
+HELP
+  exit 0
+fi
+echo "unexpected invocation: $*" >&2
+exit 99
+EOF
+  chmod +x "${fake_python}"
+
+  local output
+  if output="$(
+    VLLM_MLX_PYTHON="${fake_python}" \
+    VLLM_MLX_REPO="${fake_repo}" \
+    VLLM_MLX_MODEL_ALIAS="qwen3.5-4b" \
+    VLLM_MLX_DRY_RUN=true \
+    bash "${REPO_ROOT}/scripts/server_start_vllm_mlx.sh" 2>&1
+  )"; then
+    echo "FAIL: launcher succeeded against a CLI without --served-model-name"
+    echo "${output}"
+    return 1
+  fi
+
+  if [[ "${output}" == *"does not support --served-model-name"* && \
+        "${output}" == *"waybarrios/vllm-mlx#125"* ]]; then
+    echo "PASS: launcher reports the upstream served-model-name requirement clearly"
+  else
+    echo "FAIL: launcher did not report the served-model-name requirement clearly"
+    echo "${output}"
+    return 1
+  fi
+}
+
 test_opencode_config() {
   echo "TEST: OpenCode vllm-mlx config generation"
   local home_dir="${TMPDIR}/home-opencode"
@@ -133,6 +174,7 @@ EOF
 
 test_registry_resolution || FAILED=1
 test_server_start_dry_run || FAILED=1
+test_server_start_requires_served_model_name_support || FAILED=1
 test_opencode_config || FAILED=1
 test_codex_config || FAILED=1
 test_codex_config_replaces_legacy_block || FAILED=1
