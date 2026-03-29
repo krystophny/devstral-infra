@@ -28,7 +28,7 @@ instance_var() {
 case "${INSTANCE}" in
   local)
     DEFAULT_PORT="8080"
-    DEFAULT_MODEL_ALIAS="qwen3.5-122b-a10b"
+    DEFAULT_MODEL_ALIAS="qwen3-coder-next"
     DEFAULT_SERVED_NAME="qwen"
     ;;
   fast)
