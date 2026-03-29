@@ -28,7 +28,7 @@ instance_var() {
 case "${INSTANCE}" in
   local)
     DEFAULT_PORT="8080"
-    DEFAULT_MODEL_ALIAS="qwen3-coder-next"
+    DEFAULT_MODEL_ALIAS="qwen3.5-122b-a10b"
     DEFAULT_SERVED_NAME="qwen"
     ;;
   fast)
@@ -81,6 +81,7 @@ repo_id="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field repo_id)"
 default_max_tokens="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field default_max_tokens)"
 tool_call_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field tool_call_parser)"
 reasoning_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field reasoning_parser)"
+continuous_batching="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field continuous_batching)"
 MAX_TOKENS="$(instance_var MAX_TOKENS "${default_max_tokens:-32768}")"
 
 PID_FILE="${RUN_DIR}/vllm-mlx-${INSTANCE}.pid"
@@ -119,9 +120,12 @@ CMD=(
   "${PORT}"
   --max-tokens
   "${MAX_TOKENS}"
-  --continuous-batching
   --enable-auto-tool-choice
 )
+
+if [[ "${continuous_batching}" == "true" ]]; then
+  CMD+=(--continuous-batching)
+fi
 
 if [[ -n "${tool_call_parser}" ]]; then
   CMD+=(--tool-call-parser "${tool_call_parser}")
