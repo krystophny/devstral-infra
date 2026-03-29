@@ -15,6 +15,7 @@ class ModelSpec:
     repo_id: str
     codex_model: str
     default_served_model_name: str
+    default_max_tokens: int
     tool_call_parser: str | None
     reasoning_parser: str | None
     benchmark_enabled: bool
@@ -22,20 +23,20 @@ class ModelSpec:
     default: bool = False
 
 MODEL_SPECS: tuple[ModelSpec, ...] = (
-    ModelSpec("qwen3.5-0.8b", "qwen", "mlx-community/Qwen3.5-0.8B-MLX-8bit", "Qwen3.5-0.8B", "qwen", "qwen", "qwen3", True, 1.0),
-    ModelSpec("qwen3.5-2b", "qwen", "mlx-community/Qwen3.5-2B-MLX-8bit", "Qwen3.5-2B", "qwen", "qwen", "qwen3", True, 2.5),
-    ModelSpec("qwen3.5-4b", "qwen", "mlx-community/Qwen3.5-4B-MLX-8bit", "Qwen3.5-4B", "qwen", "qwen", "qwen3", True, 4.8),
-    ModelSpec("qwen3.5-9b", "qwen", "mlx-community/Qwen3.5-9B-MLX-8bit", "Qwen3.5-9B", "qwen", "qwen", "qwen3", True, 10.5),
-    ModelSpec("qwen3.5-27b", "qwen", "mlx-community/Qwen3.5-27B-8bit", "Qwen3.5-27B", "qwen", "qwen", "qwen3", True, 31.0),
-    ModelSpec("qwen3.5-35b-a3b", "qwen", "mlx-community/Qwen3.5-35B-A3B-8bit", "Qwen3.5-35B-A3B", "qwen", "qwen", "qwen3", True, 24.0, True),
-    ModelSpec("qwen3.5-122b-a10b", "qwen", "mlx-community/Qwen3.5-122B-A10B-8bit", "Qwen3.5-122B-A10B", "qwen", "qwen", "qwen3", True, 82.0),
-    ModelSpec("qwen3-coder-30b-a3b", "qwen-coder", "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit", "Qwen3-Coder-30B-A3B-Instruct", "qwen", "qwen3_coder", "qwen3", True, 22.0),
-    ModelSpec("qwen3-coder-next", "qwen-coder", "mlx-community/Qwen3-Coder-Next-8bit", "Qwen3-Coder-Next", "qwen", "qwen3_coder", "qwen3", True, 140.0),
-    ModelSpec("gpt-oss-20b", "gpt-oss", "lmstudio-community/gpt-oss-20b-MLX-8bit", "GPT-OSS-20B", "qwen", "harmony", "gpt_oss", True, 13.0),
-    ModelSpec("gpt-oss-120b", "gpt-oss", "lmstudio-community/gpt-oss-120b-MLX-8bit", "GPT-OSS-120B", "qwen", "harmony", "gpt_oss", True, 78.0),
-    ModelSpec("nemotron-120b-a12b", "nemotron", "inferencerlabs/NVIDIA-Nemotron-3-Super-120B-A12B-MLX-9bit", "NVIDIA-Nemotron-3-Super-120B-A12B", "qwen", "nemotron", None, True, 95.0),
-    ModelSpec("devstral-small-2-24b", "devstral", "mlx-community/Devstral-Small-2-24B-Instruct-2512-8bit", "Devstral-Small-2-24B-Instruct-2512", "qwen", "mistral", None, True, 18.0),
-    ModelSpec("devstral-2-123b", "devstral", "mlx-community/Devstral-2-123B-Instruct-2512-8bit", "Devstral-2-123B-Instruct-2512", "qwen", "mistral", None, True, 88.0),
+    ModelSpec("qwen3.5-0.8b", "qwen", "mlx-community/Qwen3.5-0.8B-MLX-8bit", "Qwen3.5-0.8B", "qwen", 32768, "qwen", "qwen3", True, 1.0),
+    ModelSpec("qwen3.5-2b", "qwen", "mlx-community/Qwen3.5-2B-MLX-8bit", "Qwen3.5-2B", "qwen", 32768, "qwen", "qwen3", True, 2.5),
+    ModelSpec("qwen3.5-4b", "qwen", "mlx-community/Qwen3.5-4B-MLX-8bit", "Qwen3.5-4B", "qwen", 32768, "qwen", "qwen3", True, 4.8),
+    ModelSpec("qwen3.5-9b", "qwen", "mlx-community/Qwen3.5-9B-MLX-8bit", "Qwen3.5-9B", "qwen", 32768, "qwen", "qwen3", True, 10.5),
+    ModelSpec("qwen3.5-27b", "qwen", "mlx-community/Qwen3.5-27B-8bit", "Qwen3.5-27B", "qwen", 32768, "qwen", "qwen3", True, 31.0),
+    ModelSpec("qwen3.5-35b-a3b", "qwen", "mlx-community/Qwen3.5-35B-A3B-8bit", "Qwen3.5-35B-A3B", "qwen", 32768, "qwen", "qwen3", True, 24.0, True),
+    ModelSpec("qwen3.5-122b-a10b", "qwen", "mlx-community/Qwen3.5-122B-A10B-8bit", "Qwen3.5-122B-A10B", "qwen", 262144, "qwen", "qwen3", True, 82.0),
+    ModelSpec("qwen3-coder-30b-a3b", "qwen-coder", "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit", "Qwen3-Coder-30B-A3B-Instruct", "qwen", 32768, "qwen3_coder", "qwen3", True, 22.0),
+    ModelSpec("qwen3-coder-next", "qwen-coder", "mlx-community/Qwen3-Coder-Next-8bit", "Qwen3-Coder-Next", "qwen", 32768, "qwen3_coder", "qwen3", True, 140.0),
+    ModelSpec("gpt-oss-20b", "gpt-oss", "lmstudio-community/gpt-oss-20b-MLX-8bit", "GPT-OSS-20B", "qwen", 32768, "harmony", "gpt_oss", True, 13.0),
+    ModelSpec("gpt-oss-120b", "gpt-oss", "lmstudio-community/gpt-oss-120b-MLX-8bit", "GPT-OSS-120B", "qwen", 32768, "harmony", "gpt_oss", True, 78.0),
+    ModelSpec("nemotron-120b-a12b", "nemotron", "inferencerlabs/NVIDIA-Nemotron-3-Super-120B-A12B-MLX-9bit", "NVIDIA-Nemotron-3-Super-120B-A12B", "qwen", 32768, "nemotron", None, True, 95.0),
+    ModelSpec("devstral-small-2-24b", "devstral", "mlx-community/Devstral-Small-2-24B-Instruct-2512-8bit", "Devstral-Small-2-24B-Instruct-2512", "qwen", 32768, "mistral", None, True, 18.0),
+    ModelSpec("devstral-2-123b", "devstral", "mlx-community/Devstral-2-123B-Instruct-2512-8bit", "Devstral-2-123B-Instruct-2512", "qwen", 32768, "mistral", None, True, 88.0),
 )
 
 MODEL_BY_ALIAS = {model.alias: model for model in MODEL_SPECS}
