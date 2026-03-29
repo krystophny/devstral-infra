@@ -123,7 +123,7 @@ test_opencode_config() {
      grep -q '"name": "vllm-mlx"' "${config_path}" && \
      grep -q '"npm": "@ai-sdk/openai"' "${config_path}" && \
      grep -q '"tool_call": true' "${config_path}" && \
-     grep -q '"baseURL": "http://127.0.0.1:8080/v1"' "${config_path}"; then
+     grep -q '"baseURL": "http://10.77.0.20:8080/v1"' "${config_path}"; then
     echo "PASS: OpenCode config uses Responses-capable local vllm-mlx"
   else
     echo "FAIL: OpenCode config missing expected fields"
