@@ -33,7 +33,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec("qwen3.5-35b-a3b", "qwen", "mlx-community/Qwen3.5-35B-A3B-8bit", "Qwen3.5-35B-A3B", "qwen", 32768, "qwen", "qwen3", True, 24.0, True),
     ModelSpec("qwen3.5-122b-a10b", "qwen", "mlx-community/Qwen3.5-122B-A10B-8bit", "Qwen3.5-122B-A10B", "qwen", 262144, "qwen", "qwen3", True, 82.0),
     ModelSpec("qwen3-coder-30b-a3b", "qwen-coder", "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit", "Qwen3-Coder-30B-A3B-Instruct", "qwen", 32768, "qwen3_coder", "qwen3", True, 22.0),
-    ModelSpec("qwen3-coder-next", "qwen-coder", "mlx-community/Qwen3-Coder-Next-8bit", "Qwen3-Coder-Next", "qwen", 32768, "qwen3_coder", "qwen3", True, 140.0),
+    ModelSpec("qwen3-coder-next", "qwen-coder", "mlx-community/Qwen3-Coder-Next-8bit", "Qwen3-Coder-Next", "qwen", 262144, "qwen3_coder", "qwen3", True, 140.0),
     ModelSpec("gpt-oss-20b", "gpt-oss", "lmstudio-community/gpt-oss-20b-MLX-8bit", "GPT-OSS-20B", "qwen", 32768, "harmony", "gpt_oss", True, 13.0),
     ModelSpec("gpt-oss-120b", "gpt-oss", "lmstudio-community/gpt-oss-120b-MLX-8bit", "GPT-OSS-120B", "qwen", 32768, "harmony", "gpt_oss", True, 78.0),
     ModelSpec("nemotron-120b-a12b", "nemotron", "inferencerlabs/NVIDIA-Nemotron-3-Super-120B-A12B-MLX-9bit", "NVIDIA-Nemotron-3-Super-120B-A12B", "qwen", 32768, "nemotron", None, True, 95.0),
