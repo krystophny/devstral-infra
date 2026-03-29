@@ -38,11 +38,11 @@ case "${INSTANCE}" in
     ;;
 esac
 
-HOST="${DEVSTRAL_HOST:-127.0.0.1}"
+HOST="${DEVSTRAL_HOST:-0.0.0.0}"
+HEALTHCHECK_HOST="${DEVSTRAL_HEALTHCHECK_HOST:-127.0.0.1}"
 PORT="${DEVSTRAL_PORT:-${DEFAULT_PORT}}"
 MODEL_ALIAS="$(instance_var MODEL_ALIAS "${DEFAULT_MODEL_ALIAS}")"
 SERVED_NAME="$(instance_var SERVED_MODEL_NAME "${DEFAULT_SERVED_NAME}")"
-MAX_TOKENS="$(instance_var MAX_TOKENS "32768")"
 SMOKE_TEST="${VLLM_MLX_SMOKE_TEST:-true}"
 SMOKE_TEST_PROMPT="${VLLM_MLX_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 START_TIMEOUT="${VLLM_MLX_START_TIMEOUT:-1800}"
@@ -78,8 +78,10 @@ ensure_cli_supports_served_model_name() {
 ensure_cli_supports_served_model_name
 
 repo_id="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field repo_id)"
+default_max_tokens="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field default_max_tokens)"
 tool_call_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field tool_call_parser)"
 reasoning_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field reasoning_parser)"
+MAX_TOKENS="$(instance_var MAX_TOKENS "${default_max_tokens:-32768}")"
 
 PID_FILE="${RUN_DIR}/vllm-mlx-${INSTANCE}.pid"
 LOG_FILE="${RUN_DIR}/vllm-mlx-${INSTANCE}.log"
@@ -117,6 +119,7 @@ CMD=(
   "${PORT}"
   --max-tokens
   "${MAX_TOKENS}"
+  --continuous-batching
   --enable-auto-tool-choice
 )
 
@@ -234,7 +237,7 @@ for (( i = 1; i <= START_TIMEOUT; i++ )); do
     tail -30 "${LOG_FILE}" || true
     exit 1
   fi
-  if curl -fsS "http://${HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
+  if curl -fsS "http://${HEALTHCHECK_HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
     break
   fi
   sleep 1
@@ -257,7 +260,7 @@ PY
   response="$(
     curl -sS \
       -H 'Content-Type: application/json' \
-      "http://${HOST}:${PORT}/v1/chat/completions" \
+      "http://${HEALTHCHECK_HOST}:${PORT}/v1/chat/completions" \
       -d "${payload}"
   )"
   if [[ "${response}" != *"READY"* ]]; then
@@ -274,6 +277,7 @@ started vllm-mlx [${INSTANCE}] (pid ${pid})
 - served model name: ${SERVED_NAME}
 - tool parser: ${tool_call_parser:-auto}
 - reasoning parser: ${reasoning_parser:-none}
-- url: http://${HOST}:${PORT}/v1
+- bind host: ${HOST}
+- local url: http://${HEALTHCHECK_HOST}:${PORT}/v1
 - log: ${LOG_FILE}
 EOF
