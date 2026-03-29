@@ -141,7 +141,7 @@ test_codex_config() {
      grep -q 'wire_api = "responses"' "${config_path}" && \
      grep -q 'base_url = "http://10.77.0.20:8080/v1"' "${config_path}" && \
      grep -q 'base_url = "http://127.0.0.1:8081/v1"' "${config_path}" && \
-     grep -q 'model = "Qwen3.5-122B-A10B"' "${config_path}" && \
+     [[ "$(grep -c '^model = "qwen"$' "${config_path}")" -eq 2 ]] && \
      python3 - "${catalog_path}" <<'PY'
 import json, sys
 with open(sys.argv[1]) as fh:
