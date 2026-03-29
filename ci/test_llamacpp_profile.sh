@@ -44,6 +44,7 @@ EOF
         "${output}" == *"--checkpoint-every-n-tokens 4096"* && \
         "${output}" == *"-b 2048"* && \
         "${output}" == *"-ub 512"* && \
+        "${output}" == *"--host 0.0.0.0"* && \
         "${output}" != *"--reasoning off"* && \
         "${output}" != *"enable_thinking"* && \
         "${output}" == *"Qwen3.5-122B-A10B-Q8_0-00001-of-00004.gguf"* ]]; then
