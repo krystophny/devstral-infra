@@ -188,10 +188,19 @@ ${local_args_xml}  </array>
 </plist>
 PLIST
 
+  find_started_pid() {
+    ps ax -o pid= -o command= | awk -v repo="${repo_id}" -v port="${PORT}" '
+      index($0, "vllm_mlx.cli serve " repo) && index($0, "--port " port) {
+        print $1
+        exit
+      }
+    '
+  }
+
   if launchctl load "${PLIST_PATH}" 2>/dev/null; then
     sleep 1
-    pid="$(launchctl list "${LAUNCHD_LABEL}" 2>/dev/null | awk '{print $1}')"
-    if [[ -z "${pid}" || "${pid}" == "-" ]]; then
+    pid="$(find_started_pid)"
+    if [[ -z "${pid}" ]]; then
       die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
     fi
   else
