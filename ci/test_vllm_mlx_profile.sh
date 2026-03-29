@@ -58,15 +58,16 @@ test_server_start_default_local_profile() {
     VLLM_MLX_DRY_RUN=true \
     bash "${REPO_ROOT}/scripts/server_start_vllm_mlx.sh"
   )"
-  if [[ "${output}" == *"mlx-community/Qwen3-Coder-Next-8bit"* && \
+  if [[ "${output}" == *"mlx-community/Qwen3.5-122B-A10B-8bit"* && \
         "${output}" == *"--served-model-name qwen"* && \
         "${output}" == *"--host 0.0.0.0"* && \
         "${output}" == *"--max-tokens 262144"* && \
         "${output}" == *"--tool-call-parser qwen3_coder"* && \
-        "${output}" == *"--reasoning-parser qwen3"* ]]; then
-    echo "PASS: local launcher defaults to the coder-next LAN profile"
+        "${output}" == *"--reasoning-parser qwen3"* && \
+        "${output}" != *"--continuous-batching"* ]]; then
+    echo "PASS: local launcher defaults to the 122B simple-mode coding profile"
   else
-    echo "FAIL: local launcher default profile is not the expected coder-next config"
+    echo "FAIL: local launcher default profile is not the expected 122B simple-mode config"
     echo "${output}"
     return 1
   fi
