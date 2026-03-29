@@ -35,11 +35,12 @@ test_server_start_dry_run() {
   if [[ "${output}" == *"vllm_mlx.cli serve"* && \
         "${output}" == *"mlx-community/Qwen3.5-4B-MLX-8bit"* && \
         "${output}" == *"--served-model-name Qwen3.5-4B"* && \
+        "${output}" == *"--host 0.0.0.0"* && \
         "${output}" == *"--tool-call-parser qwen"* && \
         "${output}" == *"--reasoning-parser qwen3"* && \
-        "${output}" != *"--use-paged-cache"* && \
-        "${output}" != *"--continuous-batching"* ]]; then
-    echo "PASS: launcher emits the expected non-paged single-user profile"
+        "${output}" == *"--continuous-batching"* && \
+        "${output}" != *"--use-paged-cache"* ]]; then
+    echo "PASS: launcher emits the expected continuous-batching LAN profile"
   else
     echo "FAIL: launcher output did not include expected fields"
     echo "${output}"
@@ -116,8 +117,9 @@ test_codex_config() {
   HOME="${home_dir}" CODEX_CONFIG_PATH="${config_path}" CODEX_CATALOG_PATH="${catalog_path}" bash "${REPO_ROOT}/scripts/codex_set_vllm_mlx.sh" >/dev/null
   if grep -q 'name = "Local vllm-mlx"' "${config_path}" && \
      grep -q 'wire_api = "responses"' "${config_path}" && \
-     grep -q 'base_url = "http://127.0.0.1:8080/v1"' "${config_path}" && \
+     grep -q 'base_url = "http://10.77.0.20:8080/v1"' "${config_path}" && \
      grep -q 'base_url = "http://127.0.0.1:8081/v1"' "${config_path}" && \
+     grep -q 'model = "Qwen3.5-122B-A10B"' "${config_path}" && \
      python3 - "${catalog_path}" <<'PY'
 import json, sys
 with open(sys.argv[1]) as fh:
