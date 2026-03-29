@@ -48,6 +48,28 @@ test_server_start_dry_run() {
   fi
 }
 
+test_server_start_default_local_profile() {
+  echo "TEST: vllm-mlx launcher default local profile"
+  local output
+  output="$(
+    VLLM_MLX_PYTHON="/Users/ert/code/.venv/bin/python" \
+    VLLM_MLX_REPO="/Users/ert/code/vllm-mlx" \
+    VLLM_MLX_SMOKE_TEST=false \
+    VLLM_MLX_DRY_RUN=true \
+    bash "${REPO_ROOT}/scripts/server_start_vllm_mlx.sh"
+  )"
+  if [[ "${output}" == *"mlx-community/Qwen3.5-122B-A10B-8bit"* && \
+        "${output}" == *"--served-model-name qwen"* && \
+        "${output}" == *"--host 0.0.0.0"* && \
+        "${output}" == *"--max-tokens 262144"* ]]; then
+    echo "PASS: local launcher defaults to the 122B LAN profile"
+  else
+    echo "FAIL: local launcher default profile is not the expected 122B config"
+    echo "${output}"
+    return 1
+  fi
+}
+
 test_server_start_requires_served_model_name_support() {
   echo "TEST: vllm-mlx launcher fails fast without --served-model-name support"
   local fake_python="${TMPDIR}/fake-vllm-python.sh"
@@ -178,6 +200,7 @@ EOF
 
 test_registry_resolution || FAILED=1
 test_server_start_dry_run || FAILED=1
+test_server_start_default_local_profile || FAILED=1
 test_server_start_requires_served_model_name_support || FAILED=1
 test_opencode_config || FAILED=1
 test_codex_config || FAILED=1
