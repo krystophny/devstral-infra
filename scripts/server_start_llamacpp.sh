@@ -50,13 +50,13 @@ case "${INSTANCE}" in
   local)
     DEFAULT_PORT="8080"
     DEFAULT_MODEL_ALIAS="qwen3.5-35b-a3b"
-    DEFAULT_CONTEXT="262144"
+    DEFAULT_CONTEXT="65536"
     DEFAULT_THINKING="true"
     ;;
   fast)
     DEFAULT_PORT="8081"
     DEFAULT_MODEL_ALIAS="qwen3.5-9b"
-    DEFAULT_CONTEXT="32768"
+    DEFAULT_CONTEXT="65536"
     DEFAULT_THINKING="false"
     ;;
 esac
