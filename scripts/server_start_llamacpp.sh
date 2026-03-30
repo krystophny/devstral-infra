@@ -50,13 +50,13 @@ case "${INSTANCE}" in
   local)
     DEFAULT_PORT="8080"
     DEFAULT_MODEL_ALIAS="qwen3.5-35b-a3b"
-    DEFAULT_CONTEXT="65536"
+    DEFAULT_CONTEXT="131072"
     DEFAULT_THINKING="true"
     ;;
   fast)
     DEFAULT_PORT="8081"
     DEFAULT_MODEL_ALIAS="qwen3.5-9b"
-    DEFAULT_CONTEXT="65536"
+    DEFAULT_CONTEXT="131072"
     DEFAULT_THINKING="false"
     ;;
 esac
@@ -238,6 +238,7 @@ CMD+=(
   -t "${CPU_THREADS}"        # CPU threads
   --host "${HOST}"
   --port "${PORT}"
+  --alias qwen               # Stable model name for API clients
   --jinja                    # Enable Jinja templating
 )
 
