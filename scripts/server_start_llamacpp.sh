@@ -111,7 +111,7 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-9b) HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q8_0" ;;
         qwen3.5-27b) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q8_0" ;;
         qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
-        qwen3.5-122b-a10b) MODEL_PATH="/Users/ert/models/Qwen3.5-122B-A10B-Q6_K/Q6_K/Qwen3.5-122B-A10B-Q6_K-00001-of-00004.gguf" ;;
+        qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
         gpt-oss-20b) HF_MODEL="ggml-org/gpt-oss-20b-GGUF" ;;
         gpt-oss-120b) HF_MODEL="ggml-org/gpt-oss-120b-GGUF" ;;
         nemotron-120b-a12b) HF_MODEL="lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF:Q8_0" ;;
