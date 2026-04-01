@@ -28,7 +28,24 @@ scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp serve
 scripts/llamacpp_model_inventory.sh  # Show normalized benchmark model inventory
 scripts/llamacpp_prefetch_models.sh  # Download benchmark model set
 scripts/llamacpp_clean_model_cache.sh  # Remove non-standard local cache entries
+scripts/server_start_bge_llamacpp.sh  # Start BGE-M3 embedding server on 11434
+scripts/server_stop_bge_llamacpp.sh   # Stop BGE-M3 embedding server
 ```
+
+### BGE-M3 Embeddings with llama.cpp
+
+```bash
+LLAMACPP_EMBEDDING_MODEL=/home/ert/.local/share/tabura-llm/models/bge-m3.gguf \
+LLAMACPP_EMBEDDING_PORT=11434 \
+LLAMACPP_EMBEDDING_ALIAS=bge-m3 \
+scripts/server_start_bge_llamacpp.sh
+```
+
+```bash
+scripts/server_stop_bge_llamacpp.sh
+```
+
+This keeps the same API port (`11434`) while switching the embedding backend from Ollama to llama.cpp.
 
 ## Platform Backends
 
