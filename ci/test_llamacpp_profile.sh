@@ -39,7 +39,7 @@ EOF
   if [[ -f "${backup_dir}/llamacpp-local.pid" ]]; then mv "${backup_dir}/llamacpp-local.pid" "${pid_file}"; fi
   if [[ -f "${backup_dir}/llamacpp-local.port" ]]; then mv "${backup_dir}/llamacpp-local.port" "${port_file}"; fi
 
-  if [[ "${output}" == *"-c 262144"* && \
+  if [[ "${output}" == *"-c 131072"* && \
         "${output}" == *"--ctx-checkpoints 64"* && \
         "${output}" == *"--checkpoint-every-n-tokens 4096"* && \
         "${output}" == *"-b 2048"* && \
@@ -65,20 +65,19 @@ test_opencode_config() {
 
   HOME="${home_dir}" \
   OPENCODE_CONFIG_PATH="${config_path}" \
-  OPENCODE_LOCAL_API_BASE="http://127.0.0.1:8080/v1" \
   bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
 
-  if grep -q '"model": "llamacpp/qwen"' "${config_path}" && \
+  if grep -q '"model": "llamacpp/qwen3.5-9b"' "${config_path}" && \
      grep -q '"permission": "allow"' "${config_path}" && \
-     grep -q '"context": 262144' "${config_path}" && \
-     grep -q '"output": 32768' "${config_path}" && \
+     grep -q '"context": 65536' "${config_path}" && \
+     grep -q '"output": 8192' "${config_path}" && \
      grep -q '"temperature": 0.6' "${config_path}" && \
      grep -q '"top_p": 0.95' "${config_path}" && \
      grep -q '"top_k": 20' "${config_path}" && \
      grep -q '"min_p": 0.0' "${config_path}" && \
      grep -q '"presence_penalty": 0.0' "${config_path}" && \
      grep -q '"repeat_penalty": 1.0' "${config_path}" && \
-     grep -q 'http://127.0.0.1:8080/v1' "${config_path}"; then
+     grep -q 'http://127.0.0.1:8081/v1' "${config_path}"; then
     echo "PASS: OpenCode config uses the recommended local profile"
   else
     echo "FAIL: OpenCode config missing expected fields"
@@ -341,9 +340,9 @@ EOF
   if [[ -f "${backup_dir}/llamacpp-fast.port" ]]; then mv "${backup_dir}/llamacpp-fast.port" "${port_file}"; fi
 
   if [[ "${output}" == *"--port 8081"* && \
-        "${output}" == *"-c 32768"* && \
+        "${output}" == *"-c 131072"* && \
         "${output}" == *"--reasoning off"* ]]; then
-    echo "PASS: fast instance uses port 8081, 32K context, thinking off"
+    echo "PASS: fast instance uses port 8081, 131K context, thinking off"
   else
     echo "FAIL: fast instance dry-run output incorrect"
     echo "${output}"
