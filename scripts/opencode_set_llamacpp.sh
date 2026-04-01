@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Configure OpenCode for local llama.cpp server with the benchmark default local Qwen profile.
+# Configure OpenCode for local llama.cpp server with the default fast local Qwen profile.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
-# llama.cpp uses port 8080 by default
-PORT="${DEVSTRAL_PORT:-8080}"
+# OpenCode defaults to the fast local llama.cpp instance
+PORT="${DEVSTRAL_PORT:-8081}"
 HOST="${DEVSTRAL_HOST:-127.0.0.1}"
 API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
 # Model identifier for OpenCode
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen}"
-CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-262144}"
-OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-32768}"
-PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-qwen}"
-MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-qwen}"
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen3.5-9b}"
+CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-65536}"
+OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-8192}"
+PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-llama.cpp (Local)}"
+MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-Qwen3.5 9B (Local)}"
 TEMPERATURE="${OPENCODE_LOCAL_TEMPERATURE:-0.6}"
 TOP_P="${OPENCODE_LOCAL_TOP_P:-0.95}"
 TOP_K="${OPENCODE_LOCAL_TOP_K:-20}"
@@ -92,5 +92,5 @@ echo "- repeat_penalty: ${REPEAT_PENALTY}"
 echo "- permission: allow"
 echo ""
 echo "Usage:"
-echo "  1. Start server: scripts/server_start_llamacpp.sh"
+echo "  1. Start server: scripts/server_start_llamacpp.sh fast"
 echo "  2. Run: opencode"
