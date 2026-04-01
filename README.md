@@ -114,14 +114,15 @@ scripts/opencode_set_llamacpp.sh
 ```
 
 Recommended local profile:
-- default benchmark model: `Qwen3.5-35B-A3B` `Q8_0`
+- default OpenCode model: `Qwen3.5-9B`
+- default OpenCode llama.cpp endpoint: `http://127.0.0.1:8081/v1`
 - supported local Qwen family: `0.8B`, `2B`, `4B`, `9B`, `27B`, `35B-A3B`, `122B-A10B`
 - supported local GPT-OSS family: `20B` `MXFP4`, `120B` `MXFP4`
-- context: `262144`
+- context: `65536`
 - context checkpoints: `64`
 - checkpoint interval: `4096`
 - batch / ubatch: `2048 / 512`
-- thinking: `on` by default
+- thinking: `off` by default for the OpenCode fast profile
 - OpenCode sampling defaults for precise coding: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
 - OpenCode permissions: `allow` by default for the generated local profile
 - launcher: `launchd` user agent on macOS, `systemd --user` on Linux
