@@ -341,8 +341,8 @@ EOF
 
   if [[ "${output}" == *"--port 8081"* && \
         "${output}" == *"-c 131072"* && \
-        "${output}" == *"--reasoning off"* ]]; then
-    echo "PASS: fast instance uses port 8081, 131K context, thinking off"
+        "${output}" != *"--reasoning off"* ]]; then
+    echo "PASS: fast instance uses port 8081, 131K context, thinking on"
   else
     echo "FAIL: fast instance dry-run output incorrect"
     echo "${output}"
