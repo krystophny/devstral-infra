@@ -22,10 +22,22 @@ test_registry_resolution() {
 
 test_server_start_dry_run() {
   echo "TEST: vllm-mlx launcher dry-run profile"
+  local fake_repo="${TMPDIR}/fake-vllm-repo-dry"
+  mkdir -p "${fake_repo}"
+  local fake_python="${TMPDIR}/fake-vllm-python-dry.sh"
+  cat > "${fake_python}" <<'PYEOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"-m vllm_mlx.cli serve --help"* ]]; then
+  echo "usage: cli.py serve [-h] [--host HOST] [--port PORT] [--served-model-name NAME]"
+  exit 0
+fi
+exit 99
+PYEOF
+  chmod +x "${fake_python}"
   local output
   output="$(
-    VLLM_MLX_PYTHON="/Users/user/code/.venv/bin/python" \
-    VLLM_MLX_REPO="/Users/user/code/vllm-mlx" \
+    VLLM_MLX_PYTHON="${fake_python}" \
+    VLLM_MLX_REPO="${fake_repo}" \
     VLLM_MLX_MODEL_ALIAS="qwen3.5-4b" \
     VLLM_MLX_SERVED_MODEL_NAME="Qwen3.5-4B" \
     VLLM_MLX_SMOKE_TEST=false \
@@ -50,10 +62,22 @@ test_server_start_dry_run() {
 
 test_server_start_default_local_profile() {
   echo "TEST: vllm-mlx launcher default local profile"
+  local fake_repo="${TMPDIR}/fake-vllm-repo-default"
+  mkdir -p "${fake_repo}"
+  local fake_python="${TMPDIR}/fake-vllm-python-default.sh"
+  cat > "${fake_python}" <<'PYEOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"-m vllm_mlx.cli serve --help"* ]]; then
+  echo "usage: cli.py serve [-h] [--host HOST] [--port PORT] [--served-model-name NAME]"
+  exit 0
+fi
+exit 99
+PYEOF
+  chmod +x "${fake_python}"
   local output
   output="$(
-    VLLM_MLX_PYTHON="/Users/user/code/.venv/bin/python" \
-    VLLM_MLX_REPO="/Users/user/code/vllm-mlx" \
+    VLLM_MLX_PYTHON="${fake_python}" \
+    VLLM_MLX_REPO="${fake_repo}" \
     VLLM_MLX_SMOKE_TEST=false \
     VLLM_MLX_DRY_RUN=true \
     bash "${REPO_ROOT}/scripts/server_start_vllm_mlx.sh"
