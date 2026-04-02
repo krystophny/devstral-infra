@@ -62,13 +62,16 @@ cat > "${CONFIG_PATH}" <<EOF
             "context": ${CONTEXT_SIZE},
             "output": ${OUTPUT_LIMIT}
           },
+          "reasoning": true,
+          "tool_call": true,
           "options": {
             "temperature": ${TEMPERATURE},
             "top_p": ${TOP_P},
             "top_k": ${TOP_K},
             "min_p": ${MIN_P},
             "presence_penalty": ${PRESENCE_PENALTY},
-            "repeat_penalty": ${REPEAT_PENALTY}
+            "repeat_penalty": ${REPEAT_PENALTY},
+            "thinking_budget": 4096
           }
         }
       }
