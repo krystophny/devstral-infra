@@ -57,7 +57,7 @@ case "${INSTANCE}" in
     DEFAULT_PORT="8081"
     DEFAULT_MODEL_ALIAS="qwen3.5-9b"
     DEFAULT_CONTEXT="131072"
-    DEFAULT_THINKING="false"
+    DEFAULT_THINKING="true"
     ;;
 esac
 
