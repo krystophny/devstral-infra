@@ -69,8 +69,10 @@ test_opencode_config() {
 
   if grep -q '"model": "llamacpp/qwen3.5-9b"' "${config_path}" && \
      grep -q '"permission": "allow"' "${config_path}" && \
-     grep -q '"context": 65536' "${config_path}" && \
-     grep -q '"output": 8192' "${config_path}" && \
+     grep -q '"context": 131072' "${config_path}" && \
+     grep -q '"output": 16384' "${config_path}" && \
+     grep -q '"reasoning": true' "${config_path}" && \
+     grep -q '"thinking_budget": 4096' "${config_path}" && \
      grep -q '"temperature": 0.6' "${config_path}" && \
      grep -q '"top_p": 0.95' "${config_path}" && \
      grep -q '"top_k": 20' "${config_path}" && \
