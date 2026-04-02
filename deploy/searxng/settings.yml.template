@@ -1,0 +1,22 @@
+__USE_DEFAULT_SETTINGS_BLOCK__
+
+general:
+  instance_name: "__INSTANCE_NAME__"
+
+search:
+  autocomplete: duckduckgo
+  favicon_resolver: duckduckgo
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  base_url: "__SEARXNG_BASE_URL__/"
+  image_proxy: true
+  limiter: true
+  secret_key: "__SEARXNG_SECRET__"
+
+valkey:
+  url: "valkey://valkey:6379/0"
