@@ -186,6 +186,7 @@ ci/
 - OpenCode config generator defaults to the fast local profile: `qwen3.5-9b` on `http://127.0.0.1:8081/v1`
 - OpenCode default context: 65536, output limit: 8192
 - OpenCode config generator sets `permission: "allow"` for the local llama.cpp profile
+- OpenCode config generator sets `reasoning: true`, `tool_call: true`, and `thinking_budget: 4096`
 - OpenCode config generator sets Qwen coding defaults: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
 - Uses `launchd` user agent (`com.devstral.llamacpp`) on macOS for proper service management
 - Waits for `/v1/models` readiness instead of just `/health`
