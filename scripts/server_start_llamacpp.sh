@@ -61,7 +61,11 @@ case "${INSTANCE}" in
     ;;
 esac
 
-SIBLING_LLAMA_SERVER="/Users/ert/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  SIBLING_LLAMA_SERVER="/Users/ert/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
+else
+  SIBLING_LLAMA_SERVER="${HOME}/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
+fi
 LLAMACPP_DIR="${HOME}/.local/llama.cpp"
 if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
   LLAMA_SERVER="${LLAMACPP_SERVER_BIN}"
@@ -108,7 +112,14 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-0.8b) HF_MODEL="lmstudio-community/Qwen3.5-0.8B-GGUF:Q8_0" ;;
         qwen3.5-2b) HF_MODEL="lmstudio-community/Qwen3.5-2B-GGUF:Q8_0" ;;
         qwen3.5-4b) HF_MODEL="lmstudio-community/Qwen3.5-4B-GGUF:Q8_0" ;;
-        qwen3.5-9b) HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q8_0" ;;
+        qwen3.5-9b)
+          if [[ "${usable_mb}" -le 16384 ]]; then
+            HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q4_K_M"
+          else
+            HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q8_0"
+          fi
+          ;;
+        qwen3.5-9b-q4) HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q4_K_M" ;;
         qwen3.5-27b) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q8_0" ;;
         qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
         qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
