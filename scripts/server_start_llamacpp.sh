@@ -147,6 +147,8 @@ ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-${DEFAULT_THINKING}}"
 SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
 SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
+HTTP_TRACE_DIR="${LLAMACPP_HTTP_TRACE_DIR:-}"
+HTTP_TRACE_MAX_BYTES="${LLAMACPP_HTTP_TRACE_MAX_BYTES:-}"
 # Check if already running
 if [[ "${DRY_RUN}" != "true" && -f "${PID_FILE}" ]]; then
   pid="$(cat "${PID_FILE}")"
@@ -212,6 +214,9 @@ echo "- Ubatch: ${UBATCH_SIZE}"
 echo "- CPU threads: ${CPU_THREADS}"
 echo "- Thinking: ${ENABLE_THINKING}"
 echo "- Smoke test: ${SMOKE_TEST}"
+if [[ -n "${HTTP_TRACE_DIR}" ]]; then
+  echo "- HTTP trace dir: ${HTTP_TRACE_DIR}"
+fi
 if [[ -n "${MOE_OFFLOAD}" ]]; then
   echo "- tensor offload rule: ${MOE_OFFLOAD}"
 fi
@@ -256,6 +261,14 @@ fi
 
 if [[ "${supports_checkpoint_interval}" == "true" ]]; then
   CMD+=(--checkpoint-every-n-tokens "${CHECKPOINT_EVERY_N_TOKENS}")
+fi
+
+if [[ -n "${HTTP_TRACE_DIR}" ]]; then
+  CMD+=(--http-trace-dir "${HTTP_TRACE_DIR}")
+fi
+
+if [[ -n "${HTTP_TRACE_MAX_BYTES}" ]]; then
+  CMD+=(--http-trace-max-bytes "${HTTP_TRACE_MAX_BYTES}")
 fi
 
 # Add extra flags if specified
