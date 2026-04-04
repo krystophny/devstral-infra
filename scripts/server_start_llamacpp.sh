@@ -164,6 +164,42 @@ SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
 HTTP_TRACE_DIR="${LLAMACPP_HTTP_TRACE_DIR:-}"
 HTTP_TRACE_MAX_BYTES="${LLAMACPP_HTTP_TRACE_MAX_BYTES:-}"
+
+SAMPLER_TEMP=""
+SAMPLER_TOP_P=""
+SAMPLER_TOP_K=""
+SAMPLER_MIN_P=""
+SAMPLER_PRESENCE_PENALTY=""
+SAMPLER_REPEAT_PENALTY=""
+SAMPLER_REASONING_FORMAT=""
+SAMPLER_NO_CONTEXT_SHIFT="false"
+
+case "${MODEL_ALIAS}" in
+  qwen3.5-*|qwen3-coder-*)
+    # Official Qwen coding/llama.cpp preset.
+    SAMPLER_TEMP="0.6"
+    SAMPLER_TOP_P="0.95"
+    SAMPLER_TOP_K="20"
+    SAMPLER_MIN_P="0"
+    SAMPLER_PRESENCE_PENALTY="0.0"
+    SAMPLER_REPEAT_PENALTY="1.0"
+    SAMPLER_REASONING_FORMAT="deepseek"
+    SAMPLER_NO_CONTEXT_SHIFT="true"
+    ;;
+  devstral-small-2-24b|devstral-2-123b)
+    # Mistral's Devstral examples and generation config use low-temperature agentic serving.
+    SAMPLER_TEMP="0.15"
+    ;;
+  nemotron-120b-a12b)
+    # Official Nemotron generation config.
+    SAMPLER_TEMP="1.0"
+    SAMPLER_TOP_P="0.95"
+    ;;
+  gpt-oss-20b|gpt-oss-120b)
+    # Keep OpenAI GPT-OSS on model defaults unless an explicit official sampler preset is published.
+    ;;
+esac
+
 # Check if already running
 if [[ "${DRY_RUN}" != "true" && -f "${PID_FILE}" ]]; then
   pid="$(cat "${PID_FILE}")"
@@ -228,6 +264,14 @@ echo "- Batch: ${BATCH_SIZE}"
 echo "- Ubatch: ${UBATCH_SIZE}"
 echo "- CPU threads: ${CPU_THREADS}"
 echo "- Thinking: ${ENABLE_THINKING}"
+if [[ -n "${SAMPLER_TEMP}" ]]; then echo "- Temperature: ${SAMPLER_TEMP}"; fi
+if [[ -n "${SAMPLER_TOP_P}" ]]; then echo "- Top-p: ${SAMPLER_TOP_P}"; fi
+if [[ -n "${SAMPLER_TOP_K}" ]]; then echo "- Top-k: ${SAMPLER_TOP_K}"; fi
+if [[ -n "${SAMPLER_MIN_P}" ]]; then echo "- Min-p: ${SAMPLER_MIN_P}"; fi
+if [[ -n "${SAMPLER_PRESENCE_PENALTY}" ]]; then echo "- Presence penalty: ${SAMPLER_PRESENCE_PENALTY}"; fi
+if [[ -n "${SAMPLER_REPEAT_PENALTY}" ]]; then echo "- Repeat penalty: ${SAMPLER_REPEAT_PENALTY}"; fi
+if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then echo "- Reasoning format: ${SAMPLER_REASONING_FORMAT}"; fi
+if [[ "${SAMPLER_NO_CONTEXT_SHIFT}" == "true" ]]; then echo "- Context shift: disabled"; fi
 echo "- Smoke test: ${SMOKE_TEST}"
 if [[ -n "${HTTP_TRACE_DIR}" ]]; then
   echo "- HTTP trace dir: ${HTTP_TRACE_DIR}"
@@ -261,6 +305,38 @@ CMD+=(
   --alias qwen               # Stable model name for API clients
   --jinja                    # Enable Jinja templating
 )
+
+if [[ -n "${SAMPLER_TEMP}" ]]; then
+  CMD+=(--temp "${SAMPLER_TEMP}")
+fi
+
+if [[ -n "${SAMPLER_TOP_P}" ]]; then
+  CMD+=(--top-p "${SAMPLER_TOP_P}")
+fi
+
+if [[ -n "${SAMPLER_TOP_K}" ]]; then
+  CMD+=(--top-k "${SAMPLER_TOP_K}")
+fi
+
+if [[ -n "${SAMPLER_MIN_P}" ]]; then
+  CMD+=(--min-p "${SAMPLER_MIN_P}")
+fi
+
+if [[ -n "${SAMPLER_PRESENCE_PENALTY}" ]]; then
+  CMD+=(--presence-penalty "${SAMPLER_PRESENCE_PENALTY}")
+fi
+
+if [[ -n "${SAMPLER_REPEAT_PENALTY}" ]]; then
+  CMD+=(--repeat-penalty "${SAMPLER_REPEAT_PENALTY}")
+fi
+
+if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then
+  CMD+=(--reasoning-format "${SAMPLER_REASONING_FORMAT}")
+fi
+
+if [[ "${SAMPLER_NO_CONTEXT_SHIFT}" == "true" ]]; then
+  CMD+=(--no-context-shift)
+fi
 
 if [[ -n "${MOE_OFFLOAD}" ]]; then
   CMD+=(-ot "${MOE_OFFLOAD}")
