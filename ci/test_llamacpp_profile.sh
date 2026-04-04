@@ -44,6 +44,14 @@ EOF
         "${output}" == *"--checkpoint-every-n-tokens 4096"* && \
         "${output}" == *"-b 2048"* && \
         "${output}" == *"-ub 512"* && \
+        "${output}" == *"--temp 0.6"* && \
+        "${output}" == *"--top-p 0.95"* && \
+        "${output}" == *"--top-k 20"* && \
+        "${output}" == *"--min-p 0"* && \
+        "${output}" == *"--presence-penalty 0.0"* && \
+        "${output}" == *"--repeat-penalty 1.0"* && \
+        "${output}" == *"--reasoning-format deepseek"* && \
+        "${output}" == *"--no-context-shift"* && \
         "${output}" == *"--host 0.0.0.0"* && \
         "${output}" != *"--reasoning off"* && \
         "${output}" != *"enable_thinking"* && \
@@ -52,6 +60,63 @@ EOF
   else
     echo "FAIL: launcher output did not include the expected profile"
     echo "${output}"
+    return 1
+  fi
+}
+
+test_server_start_family_profiles() {
+  echo "TEST: llama.cpp launcher emits family-specific profiles"
+
+  local home_dir="${TMPDIR}/home-family"
+  mkdir -p "${home_dir}/.local/llama.cpp" "${home_dir}/.cache"
+  cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${home_dir}/.local/llama.cpp/llama-server"
+
+  local devstral
+  devstral="$(
+    HOME="${home_dir}" \
+    LLAMACPP_DRY_RUN=true \
+    LLAMACPP_MODEL_ALIAS=devstral-2-123b \
+    LLAMACPP_SMOKE_TEST=false \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  local nemotron
+  nemotron="$(
+    HOME="${home_dir}" \
+    LLAMACPP_DRY_RUN=true \
+    LLAMACPP_MODEL_ALIAS=nemotron-120b-a12b \
+    LLAMACPP_SMOKE_TEST=false \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  local gptoss
+  gptoss="$(
+    HOME="${home_dir}" \
+    LLAMACPP_DRY_RUN=true \
+    LLAMACPP_MODEL_ALIAS=gpt-oss-120b \
+    LLAMACPP_SMOKE_TEST=false \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  if [[ "${devstral}" == *"--temp 0.15"* && \
+        "${devstral}" != *"--top-p"* && \
+        "${nemotron}" == *"--temp 1.0"* && \
+        "${nemotron}" == *"--top-p 0.95"* && \
+        "${gptoss}" != *"--temp"* && \
+        "${gptoss}" != *"--top-p"* ]]; then
+    echo "PASS: launcher applies the expected family-specific sampling defaults"
+  else
+    echo "FAIL: family-specific launcher profiles are wrong"
+    echo "--- devstral ---"
+    echo "${devstral}"
+    echo "--- nemotron ---"
+    echo "${nemotron}"
+    echo "--- gpt-oss ---"
+    echo "${gptoss}"
     return 1
   fi
 }
@@ -355,6 +420,7 @@ EOF
 echo "=== llama.cpp Profile Tests ==="
 
 test_server_start_dry_run || FAILED=1
+test_server_start_family_profiles || FAILED=1
 test_dual_instance_dry_run || FAILED=1
 test_opencode_config || FAILED=1
 test_aider_config || FAILED=1
