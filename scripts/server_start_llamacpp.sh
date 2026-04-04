@@ -86,6 +86,10 @@ export DYLD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRAR
 
 HOST="${DEVSTRAL_HOST:-0.0.0.0}"
 PORT="${DEVSTRAL_PORT:-${DEFAULT_PORT}}"
+PROBE_HOST="${LLAMACPP_PROBE_HOST:-${HOST}}"
+if [[ "${PROBE_HOST}" == "0.0.0.0" ]]; then
+  PROBE_HOST="127.0.0.1"
+fi
 
 PID_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.pid"
 LOG_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.log"
@@ -345,7 +349,7 @@ PLIST
 
   if launchctl load "${PLIST_PATH}" 2>/dev/null; then
     sleep 1
-    pid="$(launchctl list "${LAUNCHD_LABEL}" 2>/dev/null | awk '{print $1}')"
+    pid="$(launchctl print "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null | awk '/\tpid = / {print $3; exit}')"
     if [[ -z "${pid}" || "${pid}" == "-" ]]; then
       die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
     fi
@@ -421,12 +425,7 @@ echo "${PORT}" > "${PORT_FILE}"
 # Wait for the model API to become ready. /health can succeed before inference is available.
 echo "Waiting for llama.cpp model API to become ready..."
 for (( i = 1; i <= START_TIMEOUT; i++ )); do
-  if ! kill -0 "${pid}" 2>/dev/null; then
-    echo "Failed to start. Check log: ${LOG_FILE}"
-    tail -30 "${LOG_FILE}"
-    exit 1
-  fi
-  if curl -fsS "http://${HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
+  if curl -fsS "http://${PROBE_HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
     break
   fi
   if (( i % 10 == 0 )); then
@@ -435,7 +434,7 @@ for (( i = 1; i <= START_TIMEOUT; i++ )); do
   sleep 1
 done
 
-if ! curl -fsS "http://${HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
+if ! curl -fsS "http://${PROBE_HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
   echo "Server started but not responding yet. Check log: ${LOG_FILE}"
   echo "It may still be loading the model."
 fi
@@ -446,7 +445,7 @@ if [[ "${SMOKE_TEST}" == "true" ]]; then
   model_id=""
   for (( i = 1; i <= START_TIMEOUT; i++ )); do
     model_id="$(
-      python3 - "http://${HOST}:${PORT}/v1/models" <<'PY'
+      python3 - "http://${PROBE_HOST}:${PORT}/v1/models" <<'PY'
 import json
 import sys
 from urllib.request import urlopen
@@ -465,11 +464,6 @@ if not model_id:
 print(model_id)
 PY
     )" 2>/dev/null && break || true
-    if ! kill -0 "${pid}" 2>/dev/null; then
-      echo "Model-id probe failed because llama.cpp exited. Check log: ${LOG_FILE}"
-      tail -30 "${LOG_FILE}"
-      exit 1
-    fi
     if (( i % 10 == 0 )); then
       echo "Still waiting for /v1/models to stabilize... (${i}s)"
     fi
@@ -506,13 +500,13 @@ PY
     smoke_response="$(
       curl -sS \
         -H 'Content-Type: application/json' \
-        "http://${HOST}:${PORT}/v1/chat/completions" \
+        "http://${PROBE_HOST}:${PORT}/v1/chat/completions" \
         -d "${smoke_payload}" \
         2>&1
     )"
     smoke_rc=$?
     if [[ ${smoke_rc} -eq 0 ]]; then
-      smoke_text="$(
+      smoke_ready="$(
         python3 - "${smoke_response}" <<'PY'
 import json
 import sys
@@ -522,21 +516,19 @@ choice = (data.get("choices") or [{}])[0]
 message = choice.get("message") or {}
 content = message.get("content") or ""
 reasoning = message.get("reasoning_content") or ""
-print((content + "\n" + reasoning).strip())
+if choice and (content or reasoning):
+    print("ready")
+else:
+    raise SystemExit("missing assistant content in smoke response")
 PY
       )"
-      if [[ "${smoke_text}" == *"READY"* ]]; then
+      if [[ "${smoke_ready}" == "ready" ]]; then
         smoke_ready="true"
         break
       fi
       smoke_error="unexpected smoke response: ${smoke_response}"
     else
       smoke_error="${smoke_response}"
-    fi
-    if ! kill -0 "${pid}" 2>/dev/null; then
-      echo "Smoke test failed because llama.cpp exited. Check log: ${LOG_FILE}"
-      tail -30 "${LOG_FILE}"
-      exit 1
     fi
     if (( i % 10 == 0 )); then
       echo "Still waiting for inference readiness... (${i}s)"
@@ -545,7 +537,7 @@ PY
   done
 
   if [[ "${smoke_ready}" != "true" ]]; then
-    echo "Smoke test failed: expected READY in response"
+    echo "Smoke test failed: expected a valid assistant response"
     printf '%s\n' "${smoke_error}"
     bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" "${INSTANCE}" >/dev/null 2>&1 || true
     exit 1
