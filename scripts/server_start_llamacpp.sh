@@ -127,6 +127,7 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-27b) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q8_0" ;;
         qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
         qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
+        minimax-m2.5-q4) HF_MODEL="AesSedai/MiniMax-M2.5-GGUF:Q4_K_M" ;;
         gemma-4-31b-it) HF_MODEL="ggml-org/gemma-4-31B-it-GGUF:Q8_0" ;;
         gemma-4-26b-a4b-it) HF_MODEL="ggml-org/gemma-4-26B-A4B-it-GGUF:Q8_0" ;;
         gpt-oss-20b) HF_MODEL="ggml-org/gpt-oss-20b-GGUF" ;;
@@ -195,6 +196,12 @@ case "${MODEL_ALIAS}" in
     SAMPLER_TOP_P="0.95"
     SAMPLER_TOP_K="64"
     SAMPLER_REASONING_MODE="on"
+    ;;
+  minimax-*)
+    # Official MiniMax-M2.5 inference parameters.
+    SAMPLER_TEMP="1.0"
+    SAMPLER_TOP_P="0.95"
+    SAMPLER_TOP_K="40"
     ;;
   devstral-small-2-24b|devstral-2-123b)
     # Mistral's Devstral examples and generation config use low-temperature agentic serving.
