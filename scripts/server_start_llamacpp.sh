@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start llama.cpp server with the validated local Qwen3.5 OpenCode profile.
 # Usage: server_start_llamacpp.sh [instance]
-#   instance: "local" (default, port 8080, thinking on) or "fast" (port 8081, thinking off)
+#   instance: "local" (default, port 8080, thinking on) or "fast" (port 8081, thinking on)
 #   Also settable via LLAMACPP_INSTANCE env var.
 set -euo pipefail
 
@@ -165,6 +165,7 @@ ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-${DEFAULT_THINKING}}"
 SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
 SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
+PRINT_EXEC_START="${LLAMACPP_PRINT_EXEC_START:-false}"
 HTTP_TRACE_DIR="${LLAMACPP_HTTP_TRACE_DIR:-}"
 HTTP_TRACE_MAX_BYTES="${LLAMACPP_HTTP_TRACE_MAX_BYTES:-}"
 
@@ -218,7 +219,7 @@ case "${MODEL_ALIAS}" in
 esac
 
 # Check if already running
-if [[ "${DRY_RUN}" != "true" && -f "${PID_FILE}" ]]; then
+if [[ "${DRY_RUN}" != "true" && "${PRINT_EXEC_START}" != "true" && -f "${PID_FILE}" ]]; then
   pid="$(cat "${PID_FILE}")"
   if kill -0 "${pid}" >/dev/null 2>&1; then
     echo "already running (pid ${pid})"
@@ -227,7 +228,7 @@ if [[ "${DRY_RUN}" != "true" && -f "${PID_FILE}" ]]; then
   rm -f "${PID_FILE}"
 fi
 # Safety: ensure port is free (kill orphans from stale PID files or crashed launchd)
-if [[ "${DRY_RUN}" != "true" ]]; then
+if [[ "${DRY_RUN}" != "true" && "${PRINT_EXEC_START}" != "true" ]]; then
   orphan_pids="$(lsof -ti ":${PORT}" 2>/dev/null || true)"
   if [[ -n "${orphan_pids}" ]]; then
     echo "WARNING: port ${PORT} occupied by orphan process(es), killing..."
@@ -256,45 +257,48 @@ fi
 # Optional tensor offload rule. Leave empty for max speed on Apple Silicon.
 MOE_OFFLOAD="${LLAMACPP_MOE_OFFLOAD:-}"
 
-echo "Starting llama.cpp server (instance: ${INSTANCE})..."
-echo "- Binary: ${LLAMA_SERVER}"
-version_output="$("${LLAMA_SERVER}" --version 2>&1 || true)"
-if [[ -n "${version_output}" ]]; then
-  while IFS= read -r line; do
-    echo "- ${line}"
-  done <<< "$(printf '%s\n' "${version_output}" | awk '/^version: / || /^built with /')"
-fi
-if [[ -n "${MODEL_PATH}" ]]; then
-  echo "- Model: ${MODEL_PATH}"
-else
-  echo "- Model: ${HF_MODEL} (HuggingFace, will download if needed)"
-fi
-echo "- Model alias: ${MODEL_ALIAS}"
-echo "- Context: ${CONTEXT_SIZE} tokens"
-echo "- Context checkpoints: ${CTX_CHECKPOINTS}"
-if [[ "${supports_checkpoint_interval}" == "true" ]]; then
-  echo "- Checkpoint interval: ${CHECKPOINT_EVERY_N_TOKENS} tokens"
-else
-  echo "- Checkpoint interval: runtime default (installed llama.cpp build does not support explicit tuning)"
-fi
-echo "- Batch: ${BATCH_SIZE}"
-echo "- Ubatch: ${UBATCH_SIZE}"
-echo "- CPU threads: ${CPU_THREADS}"
-echo "- Thinking: ${ENABLE_THINKING}"
-if [[ -n "${SAMPLER_TEMP}" ]]; then echo "- Temperature: ${SAMPLER_TEMP}"; fi
-if [[ -n "${SAMPLER_TOP_P}" ]]; then echo "- Top-p: ${SAMPLER_TOP_P}"; fi
-if [[ -n "${SAMPLER_TOP_K}" ]]; then echo "- Top-k: ${SAMPLER_TOP_K}"; fi
-if [[ -n "${SAMPLER_MIN_P}" ]]; then echo "- Min-p: ${SAMPLER_MIN_P}"; fi
-if [[ -n "${SAMPLER_PRESENCE_PENALTY}" ]]; then echo "- Presence penalty: ${SAMPLER_PRESENCE_PENALTY}"; fi
-if [[ -n "${SAMPLER_REPEAT_PENALTY}" ]]; then echo "- Repeat penalty: ${SAMPLER_REPEAT_PENALTY}"; fi
-if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then echo "- Reasoning format: ${SAMPLER_REASONING_FORMAT}"; fi
-if [[ "${SAMPLER_NO_CONTEXT_SHIFT}" == "true" ]]; then echo "- Context shift: disabled"; fi
-echo "- Smoke test: ${SMOKE_TEST}"
-if [[ -n "${HTTP_TRACE_DIR}" ]]; then
-  echo "- HTTP trace dir: ${HTTP_TRACE_DIR}"
-fi
-if [[ -n "${MOE_OFFLOAD}" ]]; then
-  echo "- tensor offload rule: ${MOE_OFFLOAD}"
+if [[ "${PRINT_EXEC_START}" != "true" ]]; then
+  echo "Starting llama.cpp server (instance: ${INSTANCE})..."
+  echo "- Binary: ${LLAMA_SERVER}"
+  version_output="$("${LLAMA_SERVER}" --version 2>&1 || true)"
+  if [[ -n "${version_output}" ]]; then
+    while IFS= read -r line; do
+      echo "- ${line}"
+    done <<< "$(printf '%s\n' "${version_output}" | awk '/^version: / || /^built with /')"
+  fi
+  if [[ -n "${MODEL_PATH}" ]]; then
+    echo "- Model: ${MODEL_PATH}"
+  else
+    echo "- Model: ${HF_MODEL} (HuggingFace, will download if needed)"
+  fi
+  echo "- Model alias: ${MODEL_ALIAS}"
+  echo "- Context: ${CONTEXT_SIZE} tokens"
+  echo "- Context checkpoints: ${CTX_CHECKPOINTS}"
+  if [[ "${supports_checkpoint_interval}" == "true" ]]; then
+    echo "- Checkpoint interval: ${CHECKPOINT_EVERY_N_TOKENS} tokens"
+  else
+    echo "- Checkpoint interval: runtime default (installed llama.cpp build does not support explicit tuning)"
+  fi
+  echo "- Batch: ${BATCH_SIZE}"
+  echo "- Ubatch: ${UBATCH_SIZE}"
+  echo "- CPU threads: ${CPU_THREADS}"
+  echo "- Thinking: ${ENABLE_THINKING}"
+  if [[ -n "${SAMPLER_TEMP}" ]]; then echo "- Temperature: ${SAMPLER_TEMP}"; fi
+  if [[ -n "${SAMPLER_TOP_P}" ]]; then echo "- Top-p: ${SAMPLER_TOP_P}"; fi
+  if [[ -n "${SAMPLER_TOP_K}" ]]; then echo "- Top-k: ${SAMPLER_TOP_K}"; fi
+  if [[ -n "${SAMPLER_MIN_P}" ]]; then echo "- Min-p: ${SAMPLER_MIN_P}"; fi
+  if [[ -n "${SAMPLER_PRESENCE_PENALTY}" ]]; then echo "- Presence penalty: ${SAMPLER_PRESENCE_PENALTY}"; fi
+  if [[ -n "${SAMPLER_REPEAT_PENALTY}" ]]; then echo "- Repeat penalty: ${SAMPLER_REPEAT_PENALTY}"; fi
+  if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then echo "- Reasoning format: ${SAMPLER_REASONING_FORMAT}"; fi
+  if [[ -n "${SAMPLER_REASONING_MODE}" ]]; then echo "- Reasoning mode: ${SAMPLER_REASONING_MODE}"; fi
+  if [[ "${SAMPLER_NO_CONTEXT_SHIFT}" == "true" ]]; then echo "- Context shift: disabled"; fi
+  echo "- Smoke test: ${SMOKE_TEST}"
+  if [[ -n "${HTTP_TRACE_DIR}" ]]; then
+    echo "- HTTP trace dir: ${HTTP_TRACE_DIR}"
+  fi
+  if [[ -n "${MOE_OFFLOAD}" ]]; then
+    echo "- tensor offload rule: ${MOE_OFFLOAD}"
+  fi
 fi
 
 # Build command
@@ -387,6 +391,12 @@ fi
 if [[ -n "${LLAMACPP_EXTRA_FLAGS:-}" ]]; then
   # shellcheck disable=SC2206
   CMD+=(${LLAMACPP_EXTRA_FLAGS})
+fi
+
+if [[ "${PRINT_EXEC_START}" == "true" ]]; then
+  printf '%q ' "${CMD[@]}"
+  printf '\n'
+  exit 0
 fi
 
 if [[ "${DRY_RUN}" == "true" ]]; then

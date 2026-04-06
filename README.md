@@ -139,7 +139,9 @@ Recommended local profile:
 - context checkpoints: `64`
 - checkpoint interval: `4096`
 - batch / ubatch: `2048 / 512`
-- thinking: `off` by default for the OpenCode fast profile
+- thinking: `on` by default for the OpenCode fast profile
+- WebUI: enabled by default on the llama.cpp server
+- clients that need a fast non-thinking turn should disable thinking per request instead of forcing the server off globally
 - OpenCode sampling defaults for precise coding: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
 - OpenCode permissions: `allow` by default for the generated local profile
 - launcher: `launchd` user agent on macOS, `systemd --user` on Linux

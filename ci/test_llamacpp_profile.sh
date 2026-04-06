@@ -54,6 +54,7 @@ EOF
         "${output}" == *"--no-context-shift"* && \
         "${output}" == *"--host 0.0.0.0"* && \
         "${output}" != *"--reasoning off"* && \
+        "${output}" != *"--no-webui"* && \
         "${output}" != *"enable_thinking"* && \
         "${output}" == *"Qwen3.5-122B-A10B-Q8_0-00001-of-00004.gguf"* ]]; then
     echo "PASS: launcher emits the recommended local profile"
@@ -149,6 +150,39 @@ test_opencode_config() {
   else
     echo "FAIL: OpenCode config missing expected fields"
     cat "${config_path}"
+    return 1
+  fi
+}
+
+test_exec_start_output() {
+  echo "TEST: llama.cpp launcher ExecStart rendering"
+
+  local home_dir="${TMPDIR}/home-exec-start"
+  mkdir -p "${home_dir}/.local/llama.cpp" "${home_dir}/.cache"
+  cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${home_dir}/.local/llama.cpp/llama-server"
+
+  local output
+  output="$(
+    HOME="${home_dir}" \
+    LLAMACPP_MODEL="${TMPDIR}/Qwen3.5-9B-Q8_0.gguf" \
+    LLAMACPP_SMOKE_TEST=false \
+    LLAMACPP_PRINT_EXEC_START=true \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh" fast
+  )"
+
+  if [[ "${output}" == "${home_dir}/.local/llama.cpp/llama-server"* && \
+        "${output}" == *"--port 8081"* && \
+        "${output}" != *"Starting llama.cpp server"* && \
+        "${output}" != *"--reasoning off"* && \
+        "${output}" != *"--no-webui"* ]]; then
+    echo "PASS: ExecStart rendering stays reasoning-capable and WebUI-enabled"
+  else
+    echo "FAIL: ExecStart rendering incorrect"
+    echo "${output}"
     return 1
   fi
 }
@@ -407,8 +441,9 @@ EOF
 
   if [[ "${output}" == *"--port 8081"* && \
         "${output}" == *"-c 131072"* && \
-        "${output}" != *"--reasoning off"* ]]; then
-    echo "PASS: fast instance uses port 8081, 131K context, thinking on"
+        "${output}" != *"--reasoning off"* && \
+        "${output}" != *"--no-webui"* ]]; then
+    echo "PASS: fast instance uses port 8081, 131K context, thinking on, WebUI on"
   else
     echo "FAIL: fast instance dry-run output incorrect"
     echo "${output}"
@@ -421,6 +456,7 @@ echo "=== llama.cpp Profile Tests ==="
 test_server_start_dry_run || FAILED=1
 test_server_start_family_profiles || FAILED=1
 test_dual_instance_dry_run || FAILED=1
+test_exec_start_output || FAILED=1
 test_opencode_config || FAILED=1
 test_aider_config || FAILED=1
 test_qwencode_config || FAILED=1
