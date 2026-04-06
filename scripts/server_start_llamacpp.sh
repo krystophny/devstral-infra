@@ -367,7 +367,13 @@ if [[ -n "${MOE_OFFLOAD}" ]]; then
   CMD+=(-ot "${MOE_OFFLOAD}")
 fi
 
-if [[ "${ENABLE_THINKING}" == "false" ]]; then
+if [[ "${ENABLE_THINKING}" == "true" ]]; then
+  if [[ "${supports_reasoning_toggle}" == "true" ]]; then
+    CMD+=(--reasoning on)
+  else
+    CMD+=(--chat-template-kwargs '{"enable_thinking": true}')
+  fi
+else
   if [[ "${supports_reasoning_toggle}" == "true" ]]; then
     CMD+=(--reasoning off)
   else
