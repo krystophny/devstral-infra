@@ -188,6 +188,8 @@ ci/
 - OpenCode config generator sets `permission: "allow"` for the local llama.cpp profile
 - OpenCode config generator sets `reasoning: true`, `tool_call: true`, and `thinking_budget: 4096`
 - OpenCode config generator sets Qwen coding defaults: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
+- The fast `:8081` llama.cpp profile keeps reasoning enabled and leaves the WebUI enabled
+- Clients that need a fast non-thinking turn should disable thinking per request instead of forcing the server off globally
 - Uses `launchd` user agent (`com.devstral.llamacpp`) on macOS for proper service management
 - Waits for `/v1/models` readiness instead of just `/health`
 - Runs a real chat-completions smoke test before declaring startup success

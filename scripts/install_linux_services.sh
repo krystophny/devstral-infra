@@ -9,14 +9,31 @@ UNIT_DIR="${HOME}/.config/systemd/user"
 mkdir -p "${UNIT_DIR}"
 
 LLAMA_SERVER="${HOME}/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
+LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER}")" && pwd)"
 VOXTYPE_BIN="${HOME}/.local/bin/voxtype"
 VOXTYPE_SRC="${HOME}/code/voxtype/target/release/voxtype"
+
+build_llamacpp_exec_start() {
+    local instance="$1"
+    HOME="${HOME}" \
+    DEVSTRAL_HOST=127.0.0.1 \
+    LLAMACPP_SERVER_BIN="${LLAMA_SERVER}" \
+    LLAMACPP_PRINT_EXEC_START=true \
+    LLAMACPP_SMOKE_TEST=false \
+    bash "${SCRIPT_DIR}/server_start_llamacpp.sh" "${instance}"
+}
 
 # --- llama.cpp fast instance (Qwen3.5-9B Q4_K_M, port 8081) ---
 echo "Installing devstral-llamacpp-fast.service..."
 if [[ ! -x "${LLAMA_SERVER}" ]]; then
     echo "WARNING: llama-server not found at ${LLAMA_SERVER}"
     echo "  Build it first: cd ~/code/llama.cpp-dev/llama.cpp && cmake -B build -DGGML_CUDA=ON && cmake --build build -j\$(nproc) --target llama-server"
+fi
+
+if [[ -x "${LLAMA_SERVER}" ]]; then
+    FAST_EXEC_START="$(build_llamacpp_exec_start fast)"
+else
+    FAST_EXEC_START="${LLAMA_SERVER} -hf lmstudio-community/Qwen3.5-9B-GGUF:Q4_K_M -c 131072 --ctx-checkpoints 64 --checkpoint-every-n-tokens 4096 -b 2048 -ub 512 -ngl 99 -fa on -np 1 -t 16 --host 127.0.0.1 --port 8081 --alias qwen --jinja --reasoning on"
 fi
 
 cat > "${UNIT_DIR}/devstral-llamacpp-fast.service" <<EOF
@@ -26,22 +43,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${LLAMA_SERVER} \\
-  -hf lmstudio-community/Qwen3.5-9B-GGUF:Q4_K_M \\
-  -c 131072 \\
-  --ctx-checkpoints 64 \\
-  --checkpoint-every-n-tokens 4096 \\
-  -b 2048 \\
-  -ub 512 \\
-  -ngl 99 \\
-  -fa on \\
-  -np 1 \\
-  -t 16 \\
-  --host 127.0.0.1 \\
-  --port 8081 \\
-  --alias qwen \\
-  --jinja \\
-  --reasoning on
+ExecStart=${FAST_EXEC_START}
+Environment=LD_LIBRARY_PATH=${LLAMA_SERVER_DIR}
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=900

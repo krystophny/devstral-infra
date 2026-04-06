@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Configure Codex CLI for local llama.cpp server with two profiles:
-#   local (thinking/coding on port 8080) and fast (non-thinking on port 8081).
+#   local (thinking/coding on port 8080) and fast (reasoning-capable on port 8081).
 # Also generates model catalog JSON to eliminate metadata warnings.
 set -euo pipefail
 
