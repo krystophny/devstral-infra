@@ -44,6 +44,9 @@ cat > "${CONFIG_PATH}" <<EOF
   "share": "disabled",
   "autoupdate": false,
   "permission": "allow",
+  "agent": {
+    "title": { "disable": true }
+  },
   "experimental": {
     "openTelemetry": false
   },
