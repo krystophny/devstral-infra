@@ -61,6 +61,11 @@ cat > "${CONFIG_PATH}" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
   "model": "lmstudio/${MODEL_ID}",
+  "agent": {
+    "title": {
+      "disable": true
+    }
+  },
   "share": "disabled",
   "autoupdate": false,
   "experimental": {

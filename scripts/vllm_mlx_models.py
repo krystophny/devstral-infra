@@ -29,6 +29,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec("qwen3.5-0.8b", "qwen", "mlx-community/Qwen3.5-0.8B-MLX-8bit", "Qwen3.5-0.8B", "qwen", 32768, "qwen", "qwen3", True, True, 1.0),
     ModelSpec("qwen3.5-2b", "qwen", "mlx-community/Qwen3.5-2B-MLX-8bit", "Qwen3.5-2B", "qwen", 32768, "qwen", "qwen3", True, True, 2.5),
     ModelSpec("qwen3.5-4b", "qwen", "mlx-community/Qwen3.5-4B-MLX-8bit", "Qwen3.5-4B", "qwen", 32768, "qwen", "qwen3", True, True, 4.8),
+    ModelSpec("qwen3.5-9b-4bit", "qwen", "mlx-community/Qwen3.5-9B-4bit", "Qwen3.5-9B-4bit", "qwen", 32768, "qwen", "qwen3", True, True, 5.6),
     ModelSpec("qwen3.5-9b", "qwen", "mlx-community/Qwen3.5-9B-MLX-8bit", "Qwen3.5-9B", "qwen", 32768, "qwen", "qwen3", True, True, 10.5),
     ModelSpec("qwen3.5-27b", "qwen", "mlx-community/Qwen3.5-27B-8bit", "Qwen3.5-27B", "qwen", 32768, "qwen", "qwen3", True, True, 31.0),
     ModelSpec("qwen3.5-35b-a3b", "qwen", "mlx-community/Qwen3.5-35B-A3B-8bit", "Qwen3.5-35B-A3B", "qwen", 32768, "qwen", "qwen3", True, True, 24.0, True),

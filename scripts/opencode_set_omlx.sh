@@ -41,7 +41,13 @@ cat > "${CONFIG_PATH}" << JSON
       }
     }
   },
-  "model": "omlx/${MODEL_ID}"
+  "model": "omlx/${MODEL_ID}",
+  "small_model": "omlx/${MODEL_ID}",
+  "agent": {
+    "title": {
+      "disable": true
+    }
+  }
 }
 JSON
 

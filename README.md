@@ -8,7 +8,7 @@ License: [MIT](LICENSE)
 > of any kind. Use at your own risk. Not affiliated with Mistral AI.
 
 - **Auto-detection**: Automatically selects optimal model and configuration based on hardware
-- **Cross-platform**: macOS (LM Studio + MLX), Linux (vLLM + CUDA/CPU), Windows (WSL)
+- **Cross-platform**: macOS (llama.cpp, mlx-lm, vllm-mlx, vllm-metal, oMLX), Linux (vLLM + CUDA/CPU), Windows (WSL)
 - **Tool calling**: Full tool use support for coding assistants
 - **Vibe integration**: Configure Mistral Vibe CLI to use your local server
 - **OpenCode integration**: Configure OpenCode CLI for efficient tool calling
@@ -19,17 +19,12 @@ License: [MIT](LICENSE)
 
 ```bash
 chmod +x scripts/*.sh ci/*.sh ci/*.py
-scripts/lmstudio_install.sh       # Install LM Studio (macOS/Linux)
-scripts/lmstudio_server_start.sh  # Start server
-scripts/vibe_set_lmstudio.sh      # Configure Vibe for local server
-scripts/opencode_set_lmstudio.sh  # Configure OpenCode for local server
 scripts/server_start_llamacpp.sh  # Start local llama.cpp benchmark server on port 8080
-scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp server
-scripts/llamacpp_model_inventory.sh  # Show normalized benchmark model inventory
-scripts/llamacpp_prefetch_models.sh  # Download benchmark model set
-scripts/llamacpp_clean_model_cache.sh  # Remove non-standard local cache entries
-scripts/server_start_bge_llamacpp.sh  # Start BGE-M3 embedding server on 11434
-scripts/server_stop_bge_llamacpp.sh   # Stop BGE-M3 embedding server
+scripts/server_start_mlx_lm.sh    # Start direct mlx-lm HTTP server
+scripts/server_start_vllm_mlx.sh  # Start vllm-mlx on Apple Silicon
+scripts/server_start_vllm_metal.sh  # Start vllm-metal
+scripts/server_start_omlx.sh      # Start oMLX
+scripts/benchmark_local_stacks.sh # Benchmark all local Mac stacks against the same Qwen 9B 4-bit weights
 ```
 
 ### BGE-M3 Embeddings with llama.cpp
@@ -51,15 +46,13 @@ This keeps the same API port (`11434`) while switching the embedding backend fro
 
 | Platform | Backend | GPU | Tool Calling | Port |
 |----------|---------|-----|--------------|------|
-| macOS (Apple Silicon) | LM Studio | MLX | Yes | 1234 |
-| Linux | LM Studio | NVIDIA/CPU | Yes | 1234 |
+| macOS (Apple Silicon) | llama.cpp | Metal | Yes | 8080 |
+| macOS (Apple Silicon) | mlx-lm | MLX | Yes | 8080 |
+| macOS (Apple Silicon) | vllm-mlx | MLX | Yes | 8080 |
+| macOS (Apple Silicon) | vllm-metal | Metal | Yes | 8080 |
+| macOS (Apple Silicon) | oMLX | MLX | Yes | 8000 |
 | Linux | vLLM | NVIDIA CUDA | Yes | 8080 |
 | Windows | WSL + LM Studio | NVIDIA | Yes | 1234 |
-
-**Why LM Studio on macOS?**
-- Native MLX backend with full Apple Silicon acceleration
-- OpenAI-compatible API with `lms` CLI
-- Supports 4-bit quantization for large models
 
 ## Supported Models
 
@@ -118,8 +111,10 @@ scripts/vibe_unset_local.sh   # Restore original Vibe config
 scripts/opencode_install.sh       # Install OpenCode CLI
 scripts/opencode_set_lmstudio.sh  # Configure OpenCode for LM Studio
 scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp
+scripts/opencode_set_vllm_mlx.sh  # Configure OpenCode for local vllm-mlx
+scripts/opencode_set_omlx.sh      # Configure OpenCode for local oMLX
 scripts/opencode_unset_local.sh   # Restore original OpenCode config
-scripts/benchmark_qwen35_family.sh  # Run the full Qwen3.5 llama.cpp benchmark suite
+scripts/benchmark_local_stacks.sh # Run the local Mac benchmark harness
 ```
 
 ### llama.cpp Local Benchmark Profile
@@ -166,37 +161,28 @@ Environment overrides:
 - `LLAMACPP_SMOKE_TEST`
 - `LLAMACPP_LAUNCHER`
 
-### Qwen3.5 Family Benchmark Suite
+### Local Stack Benchmark Suite
 
 ```bash
-scripts/benchmark_qwen35_family.sh
+scripts/benchmark_local_stacks.sh
 ```
 
 What it does:
-- benchmarks all official Qwen3.5 instruct variants from `0.8B` through `122B-A10B`
-- uses `llama.cpp` with `Q8_0` GGUFs when available
-- measures mean `TTFT` and mean `tokens/s`
-- runs four official Qwen reasoning profiles:
-  - Thinking / general
-  - Thinking / precise coding
-  - Non-thinking / general
-  - Non-thinking / reasoning
-- writes `report.md`, `summary.csv`, `raw-results.csv`, `summary.json`, and `raw-results.json`
+- benchmarks the same local `Qwen3.5-9B` `Q4_K_M` `GGUF` and `Qwen3.5-9B-4bit` `MLX` weights across `llama.cpp`, `mlx-lm`, `vllm-mlx`, `vllm-metal`, and `oMLX`
+- measures `TTFT`, prompt-side throughput, decode-side throughput, `TPOT`, end-to-end latency, and parallel request throughput
+- writes `summary.md`, `summary.csv`, `raw.csv`, `parallel.csv`, `summary.json`, `raw.json`, `parallel.json`, and `failures.json`
 
 Defaults:
-- context: `262144`
-- context checkpoints: `64`
-- checkpoint interval: `4096`
 - iterations: `2`
 - max generation tokens: `128`
-- output dir: `../llama.cpp-dev/issues/20428/benchmarks/qwen35-family-<timestamp>`
+- parallel requests: `4`
+- output dir: `/tmp/devstral-infra-benchmarks/local-stacks-<timestamp>`
 
 Useful overrides:
 - `OUTPUT_DIR=/path/to/output`
-- `scripts/benchmark_qwen35_family.sh --models qwen3.5-35b-a3b qwen3.5-122b-a10b`
-- `scripts/benchmark_qwen35_family.sh --iterations 3 --max-tokens 256`
-
-Generated reports are intended to be committed under the sibling meta repo at `../llama.cpp-dev/issues/20428/benchmarks/`.
+- `scripts/benchmark_local_stacks.sh --iterations 1 --max-tokens 64`
+- `scripts/benchmark_local_stacks.sh --parallel-requests 8`
+- `scripts/benchmark_local_stacks.sh --stacks llamacpp mlx-lm vllm-mlx`
 
 ### One-Command Setup (GLM-4.7 + OpenCode)
 

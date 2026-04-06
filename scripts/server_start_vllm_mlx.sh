@@ -77,11 +77,11 @@ ensure_cli_supports_served_model_name() {
 
 ensure_cli_supports_served_model_name
 
-repo_id="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field repo_id)"
+repo_id="${VLLM_MLX_REPO_ID:-$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field repo_id)}"
 default_max_tokens="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field default_max_tokens)"
-tool_call_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field tool_call_parser)"
-reasoning_parser="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field reasoning_parser)"
-continuous_batching="$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field continuous_batching)"
+tool_call_parser="${VLLM_MLX_TOOL_CALL_PARSER:-$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field tool_call_parser)}"
+reasoning_parser="${VLLM_MLX_REASONING_PARSER:-$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field reasoning_parser)}"
+continuous_batching="${VLLM_MLX_CONTINUOUS_BATCHING:-$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field continuous_batching)}"
 MAX_TOKENS="$(instance_var MAX_TOKENS "${default_max_tokens:-32768}")"
 
 PID_FILE="${RUN_DIR}/vllm-mlx-${INSTANCE}.pid"
@@ -194,9 +194,13 @@ PLIST
 
   find_started_pid() {
     ps ax -o pid= -o command= | awk -v repo="${repo_id}" -v port="${PORT}" '
-      index($0, "vllm_mlx.cli serve " repo) && index($0, "--port " port) {
-        print $1
-        exit
+      index($0, "vllm_mlx.cli serve " repo) && index($0, "--port " port) && pid == "" {
+        pid = $1
+      }
+      END {
+        if (pid != "") {
+          print pid
+        }
       }
     '
   }
