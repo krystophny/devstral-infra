@@ -134,6 +134,7 @@ test_opencode_config() {
   bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
 
   if grep -q '"model": "llamacpp/qwen3.5-9b"' "${config_path}" && \
+     grep -q '"disable": true' "${config_path}" && \
      grep -q '"permission": "allow"' "${config_path}" && \
      grep -q '"context": 131072' "${config_path}" && \
      grep -q '"output": 16384' "${config_path}" && \
@@ -168,6 +169,7 @@ EOF
   local output
   output="$(
     HOME="${home_dir}" \
+    LLAMACPP_SERVER_BIN="${home_dir}/.local/llama.cpp/llama-server" \
     LLAMACPP_MODEL="${TMPDIR}/Qwen3.5-9B-Q8_0.gguf" \
     LLAMACPP_SMOKE_TEST=false \
     LLAMACPP_PRINT_EXEC_START=true \

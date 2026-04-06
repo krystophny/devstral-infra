@@ -23,6 +23,11 @@ fi
 cat > "${CONFIG_PATH}" << JSON
 {
   "\$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "title": {
+      "disable": true
+    }
+  },
   "provider": {
     "lmstudio": {
       "npm": "@ai-sdk/openai-compatible",

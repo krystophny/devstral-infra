@@ -67,10 +67,13 @@ else
   SIBLING_LLAMA_SERVER="${HOME}/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
 fi
 LLAMACPP_DIR="${HOME}/.local/llama.cpp"
+SYSTEM_LLAMA_SERVER="$(command -v llama-server 2>/dev/null || true)"
 if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
   LLAMA_SERVER="${LLAMACPP_SERVER_BIN}"
 elif [[ -x "${SIBLING_LLAMA_SERVER}" ]]; then
   LLAMA_SERVER="${SIBLING_LLAMA_SERVER}"
+elif [[ -n "${SYSTEM_LLAMA_SERVER}" ]]; then
+  LLAMA_SERVER="${SYSTEM_LLAMA_SERVER}"
 else
   LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"
 fi

@@ -24,6 +24,11 @@ fi
 cat > "${CONFIG_PATH}" << JSON
 {
   "\$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "title": {
+      "disable": true
+    }
+  },
   "autoupdate": false,
   "share": "disabled",
   "disabled_providers": [

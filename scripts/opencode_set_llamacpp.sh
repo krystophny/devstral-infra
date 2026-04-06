@@ -41,6 +41,12 @@ cat > "${CONFIG_PATH}" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
   "model": "llamacpp/${MODEL_ID}",
+  "small_model": "llamacpp/${MODEL_ID}",
+  "agent": {
+    "title": {
+      "disable": true
+    }
+  },
   "share": "disabled",
   "autoupdate": false,
   "permission": "allow",

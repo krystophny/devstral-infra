@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start oMLX server with SSD KV cache + continuous batching for Apple Silicon.
+# Start oMLX for a local MLX benchmark model on Apple Silicon.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,38 +8,52 @@ source "${SCRIPT_DIR}/_common.sh"
 
 HOST="${DEVSTRAL_HOST:-127.0.0.1}"
 PORT="${DEVSTRAL_PORT:-8000}"
-
-MODEL_DIR="${OMLX_MODEL_DIR:-${HOME}/.omlx/models-fast}"
+MODEL_PATH="${OMLX_MODEL_PATH:-}"
+MODEL_ID="${OMLX_MODEL_ID:-qwen3.5-9b-4bit}"
+MODEL_DIR="${OMLX_MODEL_DIR:-${HOME}/.omlx/models}"
 CACHE_DIR="${OMLX_CACHE_DIR:-${HOME}/.omlx/cache}"
 CACHE_MAX_SIZE="${OMLX_CACHE_MAX_SIZE:-120GB}"
 MAX_NUM_SEQS="${OMLX_MAX_NUM_SEQS:-8}"
-PREFILL_BATCH_SIZE="${OMLX_PREFILL_BATCH_SIZE:-8}"
 COMPLETION_BATCH_SIZE="${OMLX_COMPLETION_BATCH_SIZE:-32}"
-DEFAULT_MODEL_ID="${OMLX_DEFAULT_MODEL_ID:-Devstral-2-123B-Instruct-2512-4bit}"
+START_TIMEOUT="${OMLX_START_TIMEOUT:-900}"
+SMOKE_TEST="${OMLX_SMOKE_TEST:-true}"
+SMOKE_TEST_PROMPT="${OMLX_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
+DRY_RUN="${OMLX_DRY_RUN:-false}"
 
 PID_FILE="${RUN_DIR}/omlx.pid"
 LOG_FILE="${RUN_DIR}/omlx.log"
 PORT_FILE="${RUN_DIR}/omlx.port"
 
-if ! have omlx; then
-  die "omlx not found. Install with: uv tool install --from git+https://github.com/jundot/omlx.git omlx"
+OMLX_BIN="${OMLX_BIN:-}"
+if [[ -z "${OMLX_BIN}" ]]; then
+  if have omlx; then
+    OMLX_BIN="$(command -v omlx)"
+  elif [[ -x "/opt/homebrew/opt/omlx/bin/omlx" ]]; then
+    OMLX_BIN="/opt/homebrew/opt/omlx/bin/omlx"
+  fi
+fi
+
+if [[ -z "${OMLX_BIN}" || ! -x "${OMLX_BIN}" ]]; then
+  die "omlx not found. Install with brew tap jundot/omlx https://github.com/jundot/omlx && brew install omlx"
+fi
+
+if [[ -z "${MODEL_PATH}" ]]; then
+  MODEL_PATH="$(python3 "${SCRIPT_DIR}/benchmark_model_paths.py" resolve mlx-qwen3.5-9b-4bit 2>/dev/null || true)"
+fi
+if [[ -z "${MODEL_PATH}" || ! -d "${MODEL_PATH}" ]]; then
+  die "missing MLX model path. Set OMLX_MODEL_PATH or BENCHMARK_MLX_MODEL."
 fi
 
 mkdir -p "${RUN_DIR}" "${MODEL_DIR}" "${CACHE_DIR}"
+ln -sfn "${MODEL_PATH}" "${MODEL_DIR}/${MODEL_ID}"
 
-# Seed model directory from existing local MLX models.
-for src in \
-  "${HOME}/.lmstudio/models/mlx-community/Devstral-2-123B-Instruct-2512-4bit" \
-  "${HOME}/.lmstudio/models/lmstudio-community/Devstral-Small-2507-MLX-8bit" \
-  "${HOME}/.lmstudio/models/lmstudio-community/gpt-oss-20b-mlx-8bit"; do
-  if [[ -d "${src}" ]]; then
-    ln -sfn "${src}" "${MODEL_DIR}/$(basename "${src}")"
-  fi
-done
+if [[ "${DRY_RUN}" == "true" ]]; then
+  printf 'dry-run: %q serve --host %q --port %q --model-dir %q --max-num-seqs %q --completion-batch-size %q --paged-ssd-cache-dir %q --paged-ssd-cache-max-size %q\n' \
+    "${OMLX_BIN}" "${HOST}" "${PORT}" "${MODEL_DIR}" "${MAX_NUM_SEQS}" "${COMPLETION_BATCH_SIZE}" "${CACHE_DIR}" "${CACHE_MAX_SIZE}"
+  exit 0
+fi
 
-# Persist default model selection for oMLX.
-if [[ -n "${DEFAULT_MODEL_ID}" ]]; then
-  OMLX_DEFAULT_MODEL_ID="${DEFAULT_MODEL_ID}" python - <<'PY'
+OMLX_DEFAULT_MODEL_ID="${MODEL_ID}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -59,17 +73,16 @@ if settings_file.exists():
 models = data.setdefault("models", {})
 for model_id, cfg in models.items():
     if isinstance(cfg, dict):
-        cfg["is_default"] = (model_id == target)
+        cfg["is_default"] = model_id == target
 
-target_cfg = models.setdefault(target, {})
-if not isinstance(target_cfg, dict):
-    target_cfg = {}
-models[target] = target_cfg
-target_cfg["is_default"] = True
+cfg = models.setdefault(target, {})
+if not isinstance(cfg, dict):
+    cfg = {}
+models[target] = cfg
+cfg["is_default"] = True
 
 settings_file.write_text(json.dumps(data, indent=2))
 PY
-fi
 
 if [[ -f "${PID_FILE}" ]]; then
   pid="$(cat "${PID_FILE}")"
@@ -85,12 +98,11 @@ if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
   die "port ${PORT} already in use"
 fi
 
-nohup omlx serve \
+nohup "${OMLX_BIN}" serve \
   --host "${HOST}" \
   --port "${PORT}" \
   --model-dir "${MODEL_DIR}" \
   --max-num-seqs "${MAX_NUM_SEQS}" \
-  --prefill-batch-size "${PREFILL_BATCH_SIZE}" \
   --completion-batch-size "${COMPLETION_BATCH_SIZE}" \
   --paged-ssd-cache-dir "${CACHE_DIR}" \
   --paged-ssd-cache-max-size "${CACHE_MAX_SIZE}" \
@@ -100,32 +112,50 @@ pid="$!"
 echo "${pid}" > "${PID_FILE}"
 echo "${PORT}" > "${PORT_FILE}"
 
-ready=0
-for _ in {1..60}; do
-  if curl -s "http://${HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
+for (( i = 1; i <= START_TIMEOUT; i++ )); do
   if ! kill -0 "${pid}" >/dev/null 2>&1; then
-    echo "oMLX failed to start. Log: ${LOG_FILE}"
+    echo "oMLX failed to start. Check log: ${LOG_FILE}"
     tail -40 "${LOG_FILE}" || true
     exit 1
+  fi
+  if curl -fsS "http://${HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
+    break
   fi
   sleep 1
 done
 
-if [[ "${ready}" == "1" ]]; then
-  cat <<EOF
+if [[ "${SMOKE_TEST}" == "true" ]]; then
+  payload="$(
+    python3 - "${MODEL_ID}" "${SMOKE_TEST_PROMPT}" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "model": sys.argv[1],
+    "messages": [{"role": "user", "content": sys.argv[2]}],
+    "max_tokens": 16,
+    "temperature": 0.0,
+}))
+PY
+  )"
+  response="$(
+    curl -sS \
+      -H 'Content-Type: application/json' \
+      "http://${HOST}:${PORT}/v1/chat/completions" \
+      -d "${payload}"
+  )"
+  if [[ "${response}" != *"READY"* ]]; then
+    echo "Smoke test failed"
+    printf '%s\n' "${response}"
+    exit 1
+  fi
+fi
+
+cat <<EOF
 started oMLX (pid ${pid})
+- model path: ${MODEL_PATH}
+- model id: ${MODEL_ID}
 - url: http://${HOST}:${PORT}/v1
-- model_dir: ${MODEL_DIR}
-- cache_dir: ${CACHE_DIR}
-- default_model: ${DEFAULT_MODEL_ID}
-- max_num_seqs: ${MAX_NUM_SEQS}
-- prefill_batch_size: ${PREFILL_BATCH_SIZE}
-- completion_batch_size: ${COMPLETION_BATCH_SIZE}
+- cache dir: ${CACHE_DIR}
 - log: ${LOG_FILE}
 EOF
-else
-  echo "oMLX started but is not ready yet. Check: ${LOG_FILE}"
-fi
