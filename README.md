@@ -184,6 +184,29 @@ Useful overrides:
 - `scripts/benchmark_local_stacks.sh --parallel-requests 8`
 - `scripts/benchmark_local_stacks.sh --stacks llamacpp mlx-lm vllm-mlx`
 
+Latest snapshot:
+- date: `2026-04-06`
+- machine: Apple Silicon Mac with `32 GB` RAM and `24 GB` VRAM
+- `llama.cpp`: upstream `ggml-org/llama.cpp` `master`, commit `15f786e65`, built locally at `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server`
+- command: `scripts/benchmark_local_stacks.sh --iterations 1 --max-tokens 32 --parallel-requests 2 --long-prompt-repeats 32 --stacks llamacpp mlx-lm vllm-mlx vllm-metal`
+
+```text
++------------+-----------+-------------------+------------------+------------------+
+| stack      | short ms  | decode tok/s      | long ms          | parallel req/s   |
++------------+-----------+-------------------+------------------+------------------+
+| llama.cpp  | TTFT 421  | 18.96             | TTFT 6197        | 0.49             |
+| mlx-lm     | TTFT 394  | 33.98             | TTFT 9271        | 0.80             |
+| vllm-mlx   | TTFT 354  | 5.25              | TTFT 448         | 0.78             |
+| vllm-metal | TTFT 1546 | buffered response | TTFT 9963        | 0.64             |
++------------+-----------+-------------------+------------------+------------------+
+```
+
+Notes:
+- `mlx-lm` was the strongest overall result on this machine for Qwen3.5-9B 4bit MLX.
+- `vllm-mlx` had the best short-request `TTFT`, but much lower sustained decode throughput.
+- `vllm-metal` exposed an OpenAI-compatible endpoint, but this benchmark path observed buffered completions rather than token streaming.
+- `oMLX` now starts and serves `/v1/models`, but `/v1/chat/completions` still drops the connection on first generation request, so it was excluded from the final table.
+
 ### One-Command Setup (GLM-4.7 + OpenCode)
 
 ```bash
