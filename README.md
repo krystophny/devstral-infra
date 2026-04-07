@@ -185,27 +185,28 @@ Useful overrides:
 - `scripts/benchmark_local_stacks.sh --stacks llamacpp mlx-lm vllm-mlx`
 
 Latest snapshot:
-- date: `2026-04-06`
+- date: `2026-04-07`
 - machine: Apple Silicon Mac with `32 GB` RAM and `24 GB` VRAM
 - `llama.cpp`: upstream `ggml-org/llama.cpp` `master`, commit `15f786e65`, built locally at `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server`
-- command: `scripts/benchmark_local_stacks.sh --iterations 1 --max-tokens 32 --parallel-requests 2 --long-prompt-repeats 32 --stacks llamacpp mlx-lm vllm-mlx vllm-metal`
+- command: `scripts/benchmark_local_stacks.sh --iterations 1 --max-tokens 32 --parallel-requests 2 --long-prompt-repeats 32 --stacks llamacpp mlx-lm vllm-mlx vllm-metal omlx`
 
 ```text
 +------------+-----------+-------------------+------------------+------------------+
 | stack      | short ms  | decode tok/s      | long ms          | parallel req/s   |
 +------------+-----------+-------------------+------------------+------------------+
-| llama.cpp  | TTFT 421  | 18.96             | TTFT 6197        | 0.49             |
-| mlx-lm     | TTFT 394  | 33.98             | TTFT 9271        | 0.80             |
-| vllm-mlx   | TTFT 354  | 5.25              | TTFT 448         | 0.78             |
-| vllm-metal | TTFT 1546 | buffered response | TTFT 9963        | 0.64             |
+| llama.cpp  | TTFT 394  | 19.05             | TTFT 6227        | 0.48             |
+| mlx-lm     | TTFT 438  | 33.01             | TTFT 10116       | 0.76             |
+| vllm-mlx   | TTFT 659  | 5.18              | TTFT 9507        | 0.59             |
+| vllm-metal | TTFT 1590 | buffered response | TTFT 10256       | 0.63             |
+| oMLX       | TTFT 772  | 5.21              | TTFT 9669        | 0.55             |
 +------------+-----------+-------------------+------------------+------------------+
 ```
 
 Notes:
-- `mlx-lm` was the strongest overall result on this machine for Qwen3.5-9B 4bit MLX.
-- `vllm-mlx` had the best short-request `TTFT`, but much lower sustained decode throughput.
+- `mlx-lm` remains the strongest overall result on this machine for Qwen3.5-9B 4bit MLX.
+- `vllm-mlx` is now benchmarked in simple mode for single-user comparability, but its decode path is still much slower than `mlx-lm` direct here.
 - `vllm-metal` exposed an OpenAI-compatible endpoint, but this benchmark path observed buffered completions rather than token streaming.
-- `oMLX` now starts and serves `/v1/models`, but `/v1/chat/completions` still drops the connection on first generation request, so it was excluded from the final table.
+- `oMLX` now stays up in the background and serves real `/v1/chat/completions` requests against the same MLX Qwen snapshot.
 
 ### One-Command Setup (GLM-4.7 + OpenCode)
 

@@ -127,8 +127,8 @@ def build_stacks() -> list[StackSpec]:
             port=8092,
             start_script="server_start_vllm_mlx.sh",
             stop_script="server_stop_vllm_mlx.sh",
-            start_args=("fast",),
-            stop_args=("fast",),
+            start_args=("local",),
+            stop_args=("local",),
             expected_model="qwen",
             env={
                 **common_no_smoke,
@@ -136,6 +136,7 @@ def build_stacks() -> list[StackSpec]:
                 "DEVSTRAL_HEALTHCHECK_HOST": "127.0.0.1",
                 "DEVSTRAL_PORT": "8092",
                 "VLLM_MLX_MODEL_ALIAS": "qwen3.5-9b-4bit",
+                "VLLM_MLX_CONTINUOUS_BATCHING": "false",
             },
         ),
         StackSpec(
