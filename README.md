@@ -183,28 +183,31 @@ Useful overrides:
 - `scripts/benchmark_local_stacks.sh --iterations 1 --max-tokens 64`
 - `scripts/benchmark_local_stacks.sh --parallel-requests 8`
 - `scripts/benchmark_local_stacks.sh --stacks llamacpp mlx-lm vllm-mlx`
+- `scripts/benchmark_local_stacks.sh --thinking on`
 
 Latest snapshot:
 - date: `2026-04-07`
-- machine: Apple Silicon Mac with `32 GB` RAM and `24 GB` VRAM
+- machine: Apple Silicon Mac with `32 GB` RAM, `24 GB` VRAM, `metal` GPU backend
+- thinking: `on`
 - `llama.cpp`: upstream `ggml-org/llama.cpp` `master`, commit `15f786e65`, built locally at `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server`
-- command: `scripts/benchmark_local_stacks.sh --iterations 1 --max-tokens 32 --parallel-requests 2 --long-prompt-repeats 32 --stacks llamacpp mlx-lm vllm-mlx vllm-metal omlx`
+- command: `scripts/benchmark_local_stacks.sh --thinking on --iterations 1 --max-tokens 32 --parallel-requests 2 --long-prompt-repeats 32 --stacks llamacpp mlx-lm vllm-mlx vllm-metal omlx`
 
 ```text
 +------------+-----------+-------------------+------------------+------------------+
 | stack      | short ms  | decode tok/s      | long ms          | parallel req/s   |
 +------------+-----------+-------------------+------------------+------------------+
-| llama.cpp  | TTFT 394  | 19.05             | TTFT 6227        | 0.48             |
-| mlx-lm     | TTFT 438  | 33.01             | TTFT 10116       | 0.76             |
-| vllm-mlx   | TTFT 659  | 5.18              | TTFT 9507        | 0.59             |
-| vllm-metal | TTFT 1590 | buffered response | TTFT 10256       | 0.63             |
-| oMLX       | TTFT 772  | 5.21              | TTFT 9669        | 0.55             |
+| llama.cpp  | TTFT 396  | 18.54             | TTFT 6315        | 0.48             |
+| mlx-lm     | TTFT 343  | 33.05             | TTFT 9396        | 0.82             |
+| vllm-mlx   | TTFT 651  | 32.76             | TTFT 9195        | 0.62             |
+| vllm-metal | TTFT 1621 | buffered response | TTFT 10313       | 0.61             |
+| oMLX       | TTFT 903  | 17.63             | TTFT 9423        | 0.60             |
 +------------+-----------+-------------------+------------------+------------------+
 ```
 
 Notes:
-- `mlx-lm` remains the strongest overall result on this machine for Qwen3.5-9B 4bit MLX.
-- `vllm-mlx` is now benchmarked in simple mode for single-user comparability, but its decode path is still much slower than `mlx-lm` direct here.
+- completion-token metrics in this snapshot include reasoning tokens when the runtime emits them
+- `mlx-lm` remains the strongest overall result on this machine for Qwen3.5-9B 4bit MLX
+- the earlier `vllm-mlx` `~5 tok/s` result was caused by benchmark stream timing waiting for EOF instead of `[DONE]`; with that fixed, simple-mode decode is much closer to `mlx-lm`
 - `vllm-metal` exposed an OpenAI-compatible endpoint, but this benchmark path observed buffered completions rather than token streaming.
 - `oMLX` now stays up in the background and serves real `/v1/chat/completions` requests against the same MLX Qwen snapshot.
 
