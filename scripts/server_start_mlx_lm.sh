@@ -13,6 +13,13 @@ SMOKE_TEST_PROMPT="${MLX_LM_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
 DRY_RUN="${MLX_LM_DRY_RUN:-false}"
 MODEL_PATH="${MLX_LM_MODEL:-}"
 SERVER_BIN="${MLX_LM_SERVER_BIN:-}"
+MAX_TOKENS="${MLX_LM_MAX_TOKENS:-}"
+DECODE_CONCURRENCY="${MLX_LM_DECODE_CONCURRENCY:-}"
+PROMPT_CONCURRENCY="${MLX_LM_PROMPT_CONCURRENCY:-}"
+PREFILL_STEP_SIZE="${MLX_LM_PREFILL_STEP_SIZE:-}"
+PROMPT_CACHE_SIZE="${MLX_LM_PROMPT_CACHE_SIZE:-}"
+PROMPT_CACHE_BYTES="${MLX_LM_PROMPT_CACHE_BYTES:-}"
+CHAT_TEMPLATE_ARGS="${MLX_LM_CHAT_TEMPLATE_ARGS:-}"
 
 PID_FILE="${RUN_DIR}/mlx-lm.pid"
 LOG_FILE="${RUN_DIR}/mlx-lm.log"
@@ -47,6 +54,28 @@ CMD=(
   "${PORT}"
   --use-default-chat-template
 )
+
+if [[ -n "${MAX_TOKENS}" ]]; then
+  CMD+=(--max-tokens "${MAX_TOKENS}")
+fi
+if [[ -n "${DECODE_CONCURRENCY}" ]]; then
+  CMD+=(--decode-concurrency "${DECODE_CONCURRENCY}")
+fi
+if [[ -n "${PROMPT_CONCURRENCY}" ]]; then
+  CMD+=(--prompt-concurrency "${PROMPT_CONCURRENCY}")
+fi
+if [[ -n "${PREFILL_STEP_SIZE}" ]]; then
+  CMD+=(--prefill-step-size "${PREFILL_STEP_SIZE}")
+fi
+if [[ -n "${PROMPT_CACHE_SIZE}" ]]; then
+  CMD+=(--prompt-cache-size "${PROMPT_CACHE_SIZE}")
+fi
+if [[ -n "${PROMPT_CACHE_BYTES}" ]]; then
+  CMD+=(--prompt-cache-bytes "${PROMPT_CACHE_BYTES}")
+fi
+if [[ -n "${CHAT_TEMPLATE_ARGS}" ]]; then
+  CMD+=(--chat-template-args "${CHAT_TEMPLATE_ARGS}")
+fi
 
 if [[ "${MLX_LM_TRUST_REMOTE_CODE:-false}" == "true" ]]; then
   CMD+=(--trust-remote-code)

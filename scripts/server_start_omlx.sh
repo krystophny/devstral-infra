@@ -15,6 +15,11 @@ CACHE_DIR="${OMLX_CACHE_DIR:-${HOME}/.omlx/cache}"
 CACHE_MAX_SIZE="${OMLX_CACHE_MAX_SIZE:-120GB}"
 MAX_NUM_SEQS="${OMLX_MAX_NUM_SEQS:-8}"
 COMPLETION_BATCH_SIZE="${OMLX_COMPLETION_BATCH_SIZE:-32}"
+MAX_MODEL_MEMORY="${OMLX_MAX_MODEL_MEMORY:-}"
+MAX_PROCESS_MEMORY="${OMLX_MAX_PROCESS_MEMORY:-}"
+HOT_CACHE_MAX_SIZE="${OMLX_HOT_CACHE_MAX_SIZE:-}"
+INITIAL_CACHE_BLOCKS="${OMLX_INITIAL_CACHE_BLOCKS:-}"
+DISABLE_CACHE="${OMLX_DISABLE_CACHE:-false}"
 LOG_LEVEL="${OMLX_LOG_LEVEL:-info}"
 MODEL_TYPE_OVERRIDE="${OMLX_MODEL_TYPE_OVERRIDE:-llm}"
 START_TIMEOUT="${OMLX_START_TIMEOUT:-900}"
@@ -49,9 +54,39 @@ fi
 mkdir -p "${RUN_DIR}" "${MODEL_DIR}" "${CACHE_DIR}"
 ln -sfn "${MODEL_PATH}" "${MODEL_DIR}/${MODEL_ID}"
 
+CMD=(
+  "${OMLX_BIN}"
+  serve
+  --host "${HOST}"
+  --port "${PORT}"
+  --log-level "${LOG_LEVEL}"
+  --model-dir "${MODEL_DIR}"
+  --max-num-seqs "${MAX_NUM_SEQS}"
+  --completion-batch-size "${COMPLETION_BATCH_SIZE}"
+  --paged-ssd-cache-dir "${CACHE_DIR}"
+  --paged-ssd-cache-max-size "${CACHE_MAX_SIZE}"
+)
+
+if [[ -n "${MAX_MODEL_MEMORY}" ]]; then
+  CMD+=(--max-model-memory "${MAX_MODEL_MEMORY}")
+fi
+if [[ -n "${MAX_PROCESS_MEMORY}" ]]; then
+  CMD+=(--max-process-memory "${MAX_PROCESS_MEMORY}")
+fi
+if [[ -n "${HOT_CACHE_MAX_SIZE}" ]]; then
+  CMD+=(--hot-cache-max-size "${HOT_CACHE_MAX_SIZE}")
+fi
+if [[ -n "${INITIAL_CACHE_BLOCKS}" ]]; then
+  CMD+=(--initial-cache-blocks "${INITIAL_CACHE_BLOCKS}")
+fi
+if [[ "${DISABLE_CACHE}" == "true" ]]; then
+  CMD+=(--no-cache)
+fi
+
 if [[ "${DRY_RUN}" == "true" ]]; then
-  printf 'dry-run: %q serve --host %q --port %q --log-level %q --model-dir %q --max-num-seqs %q --completion-batch-size %q --paged-ssd-cache-dir %q --paged-ssd-cache-max-size %q\n' \
-    "${OMLX_BIN}" "${HOST}" "${PORT}" "${LOG_LEVEL}" "${MODEL_DIR}" "${MAX_NUM_SEQS}" "${COMPLETION_BATCH_SIZE}" "${CACHE_DIR}" "${CACHE_MAX_SIZE}"
+  printf 'dry-run:'
+  printf ' %q' "${CMD[@]}"
+  printf '\n'
   exit 0
 fi
 
@@ -106,15 +141,7 @@ if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 pid="$(
-  python3 - "${LOG_FILE}" "${OMLX_BIN}" serve \
-    --host "${HOST}" \
-    --port "${PORT}" \
-    --log-level "${LOG_LEVEL}" \
-    --model-dir "${MODEL_DIR}" \
-    --max-num-seqs "${MAX_NUM_SEQS}" \
-    --completion-batch-size "${COMPLETION_BATCH_SIZE}" \
-    --paged-ssd-cache-dir "${CACHE_DIR}" \
-    --paged-ssd-cache-max-size "${CACHE_MAX_SIZE}" <<'PY'
+  python3 - "${LOG_FILE}" "${CMD[@]}" <<'PY'
 import subprocess
 import sys
 

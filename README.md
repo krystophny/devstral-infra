@@ -170,6 +170,7 @@ scripts/benchmark_local_stacks.sh
 What it does:
 - benchmarks the same local `Qwen3.5-9B` `Q4_K_M` `GGUF` and `Qwen3.5-9B-4bit` `MLX` weights across `llama.cpp`, `mlx-lm`, `vllm-mlx`, `vllm-metal`, and `oMLX`
 - measures `TTFT`, prompt-side throughput, decode-side throughput, `TPOT`, end-to-end latency, and parallel request throughput
+- prefixes a per-iteration marker on single-request prompts so repeated runs stay cold instead of hitting prefix caches
 - writes `summary.md`, `summary.csv`, `raw.csv`, `parallel.csv`, `summary.json`, `raw.json`, `parallel.json`, and `failures.json`
 
 Defaults:
@@ -190,24 +191,26 @@ Latest snapshot:
 - machine: Apple Silicon Mac with `32 GB` RAM, `24 GB` VRAM, `metal` GPU backend
 - thinking: `on`
 - `llama.cpp`: upstream `ggml-org/llama.cpp` `master`, commit `15f786e65`, built locally at `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server`
-- command: `scripts/benchmark_local_stacks.sh --thinking on --iterations 1 --max-tokens 32 --parallel-requests 2 --long-prompt-repeats 32 --stacks llamacpp mlx-lm vllm-mlx vllm-metal omlx`
+- command: `scripts/benchmark_local_stacks.sh --thinking on`
+- note: the `llama.cpp` row below comes from an immediate `--stacks llamacpp` rerun after a transient connection drop during the full-suite parallel phase; all rows use the same tuned cold-prompt settings
 
 ```text
 +------------+-----------+-------------------+------------------+------------------+
 | stack      | short ms  | decode tok/s      | long ms          | parallel req/s   |
 +------------+-----------+-------------------+------------------+------------------+
-| llama.cpp  | TTFT 396  | 18.54             | TTFT 6315        | 0.48             |
-| mlx-lm     | TTFT 343  | 33.05             | TTFT 9396        | 0.82             |
-| vllm-mlx   | TTFT 651  | 32.76             | TTFT 9195        | 0.62             |
-| vllm-metal | TTFT 1621 | buffered response | TTFT 10313       | 0.61             |
-| oMLX       | TTFT 903  | 17.63             | TTFT 9423        | 0.60             |
+| llama.cpp  | TTFT 406  | 17.87             | TTFT 62270       | 0.13             |
+| mlx-lm     | TTFT 746  | 34.09             | TTFT 76323       | 0.25             |
+| vllm-mlx   | TTFT 641  | 32.86             | TTFT 72551       | 0.22             |
+| vllm-metal | TTFT 4414 | buffered response | TTFT 76867       | 0.21             |
+| oMLX       | TTFT 808  | 32.80             | TTFT 73259       | 0.23             |
 +------------+-----------+-------------------+------------------+------------------+
 ```
 
 Notes:
 - completion-token metrics in this snapshot include reasoning tokens when the runtime emits them
-- `mlx-lm` remains the strongest overall result on this machine for Qwen3.5-9B 4bit MLX
-- the earlier `vllm-mlx` `~5 tok/s` result was caused by benchmark stream timing waiting for EOF instead of `[DONE]`; with that fixed, simple-mode decode is much closer to `mlx-lm`
+- tuned cold-prompt serving flipped the short-TTFT result: `llama.cpp` is now clearly best for first token on this machine, while the MLX-family servers still win decode throughput
+- `mlx-lm` remains the strongest overall MLX path here, with the best sustained decode throughput and best parallel throughput
+- `vllm-mlx` improved substantially with explicit `max-num-seqs`, `prefill-batch-size`, `completion-batch-size`, `stream-interval`, and `prefill-step-size` settings, but long-prompt TTFT still tracks the other MLX servers because long prefill dominates
 - `vllm-metal` exposed an OpenAI-compatible endpoint, but this benchmark path observed buffered completions rather than token streaming.
 - `oMLX` now stays up in the background and serves real `/v1/chat/completions` requests against the same MLX Qwen snapshot.
 
