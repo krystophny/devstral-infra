@@ -15,6 +15,8 @@ CACHE_DIR="${OMLX_CACHE_DIR:-${HOME}/.omlx/cache}"
 CACHE_MAX_SIZE="${OMLX_CACHE_MAX_SIZE:-120GB}"
 MAX_NUM_SEQS="${OMLX_MAX_NUM_SEQS:-8}"
 COMPLETION_BATCH_SIZE="${OMLX_COMPLETION_BATCH_SIZE:-32}"
+LOG_LEVEL="${OMLX_LOG_LEVEL:-info}"
+MODEL_TYPE_OVERRIDE="${OMLX_MODEL_TYPE_OVERRIDE:-llm}"
 START_TIMEOUT="${OMLX_START_TIMEOUT:-900}"
 SMOKE_TEST="${OMLX_SMOKE_TEST:-true}"
 SMOKE_TEST_PROMPT="${OMLX_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
@@ -48,12 +50,12 @@ mkdir -p "${RUN_DIR}" "${MODEL_DIR}" "${CACHE_DIR}"
 ln -sfn "${MODEL_PATH}" "${MODEL_DIR}/${MODEL_ID}"
 
 if [[ "${DRY_RUN}" == "true" ]]; then
-  printf 'dry-run: %q serve --host %q --port %q --model-dir %q --max-num-seqs %q --completion-batch-size %q --paged-ssd-cache-dir %q --paged-ssd-cache-max-size %q\n' \
-    "${OMLX_BIN}" "${HOST}" "${PORT}" "${MODEL_DIR}" "${MAX_NUM_SEQS}" "${COMPLETION_BATCH_SIZE}" "${CACHE_DIR}" "${CACHE_MAX_SIZE}"
+  printf 'dry-run: %q serve --host %q --port %q --log-level %q --model-dir %q --max-num-seqs %q --completion-batch-size %q --paged-ssd-cache-dir %q --paged-ssd-cache-max-size %q\n' \
+    "${OMLX_BIN}" "${HOST}" "${PORT}" "${LOG_LEVEL}" "${MODEL_DIR}" "${MAX_NUM_SEQS}" "${COMPLETION_BATCH_SIZE}" "${CACHE_DIR}" "${CACHE_MAX_SIZE}"
   exit 0
 fi
 
-OMLX_DEFAULT_MODEL_ID="${MODEL_ID}" python3 - <<'PY'
+OMLX_DEFAULT_MODEL_ID="${MODEL_ID}" OMLX_MODEL_TYPE_OVERRIDE="${MODEL_TYPE_OVERRIDE}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -80,6 +82,11 @@ if not isinstance(cfg, dict):
     cfg = {}
 models[target] = cfg
 cfg["is_default"] = True
+override = os.environ.get("OMLX_MODEL_TYPE_OVERRIDE", "").strip()
+if override:
+    cfg["model_type_override"] = override
+elif "model_type_override" in cfg:
+    del cfg["model_type_override"]
 
 settings_file.write_text(json.dumps(data, indent=2))
 PY
@@ -98,17 +105,34 @@ if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
   die "port ${PORT} already in use"
 fi
 
-nohup "${OMLX_BIN}" serve \
-  --host "${HOST}" \
-  --port "${PORT}" \
-  --model-dir "${MODEL_DIR}" \
-  --max-num-seqs "${MAX_NUM_SEQS}" \
-  --completion-batch-size "${COMPLETION_BATCH_SIZE}" \
-  --paged-ssd-cache-dir "${CACHE_DIR}" \
-  --paged-ssd-cache-max-size "${CACHE_MAX_SIZE}" \
-  >"${LOG_FILE}" 2>&1 &
+pid="$(
+  python3 - "${LOG_FILE}" "${OMLX_BIN}" serve \
+    --host "${HOST}" \
+    --port "${PORT}" \
+    --log-level "${LOG_LEVEL}" \
+    --model-dir "${MODEL_DIR}" \
+    --max-num-seqs "${MAX_NUM_SEQS}" \
+    --completion-batch-size "${COMPLETION_BATCH_SIZE}" \
+    --paged-ssd-cache-dir "${CACHE_DIR}" \
+    --paged-ssd-cache-max-size "${CACHE_MAX_SIZE}" <<'PY'
+import subprocess
+import sys
 
-pid="$!"
+log_path = sys.argv[1]
+cmd = sys.argv[2:]
+
+with open(log_path, "ab", buffering=0) as log_file:
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+    print(proc.pid)
+PY
+)"
 echo "${pid}" > "${PID_FILE}"
 echo "${PORT}" > "${PORT_FILE}"
 
@@ -135,6 +159,7 @@ print(json.dumps({
     "messages": [{"role": "user", "content": sys.argv[2]}],
     "max_tokens": 16,
     "temperature": 0.0,
+    "chat_template_kwargs": {"enable_thinking": False},
 }))
 PY
   )"
