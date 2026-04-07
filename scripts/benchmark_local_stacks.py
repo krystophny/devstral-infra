@@ -19,9 +19,13 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_NO_THINKING = (
     "You are benchmarking a local inference server. "
     "Respond concisely and do not include chain-of-thought."
+)
+SYSTEM_PROMPT_THINKING = (
+    "You are benchmarking a local inference server. "
+    "Think carefully and then answer concisely."
 )
 SHORT_PROMPT = (
     "Summarize what a local LLM benchmark should report in exactly three bullets. "
@@ -51,6 +55,15 @@ class StackSpec:
 class ScenarioSpec:
     slug: str
     prompt: str
+
+
+@dataclass(frozen=True)
+class SystemInfo:
+    platform: str
+    gpu: str
+    gpu_count: int
+    ram_mb: int
+    vram_mb: int
 
 
 def build_long_prompt(repeats: int) -> str:
@@ -84,10 +97,34 @@ def resolve_model_path(key: str) -> str:
     return check_output([sys.executable, str(SCRIPTS_DIR / "benchmark_model_paths.py"), "resolve", key]).strip()
 
 
-def build_stacks() -> list[StackSpec]:
+def collect_system_info() -> SystemInfo:
+    output = check_output(["bash", str(SCRIPTS_DIR / "detect_hardware.sh")])
+    values: dict[str, str] = {}
+    for line in output.splitlines():
+        if line.startswith("platform: "):
+            values["platform"] = line.split(": ", 1)[1]
+        elif line.startswith("gpu: "):
+            values["gpu"] = line.split(": ", 1)[1]
+        elif line.startswith("gpu_count: "):
+            values["gpu_count"] = line.split(": ", 1)[1]
+        elif line.startswith("vram_mb: "):
+            values["vram_mb"] = line.split(": ", 1)[1]
+        elif line.startswith("ram_mb: "):
+            values["ram_mb"] = line.split(": ", 1)[1]
+    return SystemInfo(
+        platform=values.get("platform", "unknown"),
+        gpu=values.get("gpu", "unknown"),
+        gpu_count=int(values.get("gpu_count", "0")),
+        ram_mb=int(values.get("ram_mb", "0")),
+        vram_mb=int(values.get("vram_mb", "0")),
+    )
+
+
+def build_stacks(thinking_enabled: bool) -> list[StackSpec]:
     gguf_path = resolve_model_path("gguf-qwen3.5-9b-q4")
     mlx_path = resolve_model_path("mlx-qwen3.5-9b-4bit")
     common_no_smoke = {"LLAMACPP_SMOKE_TEST": "false", "VLLM_MLX_SMOKE_TEST": "false", "MLX_LM_SMOKE_TEST": "false", "VLLM_METAL_SMOKE_TEST": "false", "OMLX_SMOKE_TEST": "false"}
+    thinking_value = "true" if thinking_enabled else "false"
 
     return [
         StackSpec(
@@ -105,7 +142,7 @@ def build_stacks() -> list[StackSpec]:
                 "DEVSTRAL_PORT": "8090",
                 "LLAMACPP_MODEL": gguf_path,
                 "LLAMACPP_MODEL_ALIAS": "qwen3.5-9b-q4",
-                "LLAMACPP_ENABLE_THINKING": "false",
+                "LLAMACPP_ENABLE_THINKING": thinking_value,
             },
         ),
         StackSpec(
@@ -137,6 +174,7 @@ def build_stacks() -> list[StackSpec]:
                 "DEVSTRAL_PORT": "8092",
                 "VLLM_MLX_MODEL_ALIAS": "qwen3.5-9b-4bit",
                 "VLLM_MLX_CONTINUOUS_BATCHING": "false",
+                "VLLM_MLX_ENABLE_THINKING": thinking_value,
             },
         ),
         StackSpec(
@@ -191,18 +229,20 @@ def pick_model(host: str, port: int, preferred: str | None) -> str:
     return models[0]
 
 
-def payload(model: str, prompt: str, max_tokens: int, stream: bool) -> dict[str, Any]:
+def payload(model: str, prompt: str, max_tokens: int, stream: bool, thinking_enabled: bool) -> dict[str, Any]:
     data = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT_THINKING if thinking_enabled else SYSTEM_PROMPT_NO_THINKING,
+            },
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.0,
         "max_tokens": max_tokens,
         "stream": stream,
-        # Keep Qwen-family runs comparable across runtimes by disabling reasoning mode.
-        "chat_template_kwargs": {"enable_thinking": False},
+        "chat_template_kwargs": {"enable_thinking": thinking_enabled},
     }
     if stream:
         data["stream_options"] = {"include_usage": True}
@@ -222,8 +262,6 @@ def _parse_stream_json_line(line: str) -> dict[str, Any] | None:
     stripped = line.strip()
     if not stripped or stripped.startswith(":"):
         return None
-    if stripped == "data: [DONE]" or stripped == "[DONE]":
-        return None
     if stripped.startswith("data: "):
         return json.loads(stripped[6:])
     if all(ch in "0123456789abcdefABCDEF" for ch in stripped):
@@ -233,8 +271,8 @@ def _parse_stream_json_line(line: str) -> dict[str, Any] | None:
     return None
 
 
-def stream_completion(host: str, port: int, model: str, prompt: str, max_tokens: int) -> tuple[float, float, dict[str, Any]]:
-    body = json.dumps(payload(model, prompt, max_tokens, True))
+def stream_completion(host: str, port: int, model: str, prompt: str, max_tokens: int, thinking_enabled: bool) -> tuple[float, float, dict[str, Any]]:
+    body = json.dumps(payload(model, prompt, max_tokens, True, thinking_enabled))
     conn = http.client.HTTPConnection(host, port, timeout=600)
     start = time.perf_counter()
     conn.request("POST", "/v1/chat/completions", body=body, headers={"Content-Type": "application/json"})
@@ -254,11 +292,15 @@ def stream_completion(host: str, port: int, model: str, prompt: str, max_tokens:
 
     ttft = None
     usage: dict[str, Any] = {}
+    done_elapsed = None
     while True:
         raw_line = response.fp.readline()
         if not raw_line:
             break
         line = raw_line.decode("utf-8", errors="replace").strip()
+        if line == "data: [DONE]" or line == "[DONE]":
+            done_elapsed = time.perf_counter() - start
+            break
         parsed = _parse_stream_json_line(line)
         if parsed is None:
             continue
@@ -270,14 +312,14 @@ def stream_completion(host: str, port: int, model: str, prompt: str, max_tokens:
             if ttft is None and _delta_has_token(delta):
                 ttft = time.perf_counter() - start
     conn.close()
-    elapsed = time.perf_counter() - start
+    elapsed = done_elapsed if done_elapsed is not None else (time.perf_counter() - start)
     if ttft is None:
         ttft = elapsed
     return ttft, elapsed, {"usage": usage}
 
 
-def completion(host: str, port: int, model: str, prompt: str, max_tokens: int) -> tuple[float, dict[str, Any]]:
-    body = json.dumps(payload(model, prompt, max_tokens, False))
+def completion(host: str, port: int, model: str, prompt: str, max_tokens: int, thinking_enabled: bool) -> tuple[float, dict[str, Any]]:
+    body = json.dumps(payload(model, prompt, max_tokens, False, thinking_enabled))
     conn = http.client.HTTPConnection(host, port, timeout=600)
     start = time.perf_counter()
     conn.request("POST", "/v1/chat/completions", body=body, headers={"Content-Type": "application/json"})
@@ -297,6 +339,7 @@ def parallel_completion(
     prompt: str,
     max_tokens: int,
     concurrency: int,
+    thinking_enabled: bool,
 ) -> dict[str, float | int | None]:
     start = time.perf_counter()
     latencies: list[float] = []
@@ -304,7 +347,7 @@ def parallel_completion(
     completion_tokens = 0
 
     def worker() -> tuple[float, dict[str, Any]]:
-        return completion(host, port, model, prompt, max_tokens)
+        return completion(host, port, model, prompt, max_tokens, thinking_enabled)
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [pool.submit(worker) for _ in range(concurrency)]
@@ -394,12 +437,21 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def render_summary(
+    system_info: SystemInfo,
     stacks: list[StackSpec],
     summary_rows: list[dict[str, Any]],
     parallel_rows: list[dict[str, Any]],
     failures: list[dict[str, str]],
+    thinking_enabled: bool,
 ) -> str:
     lines = ["# Local Stack Benchmark", ""]
+    lines.append("## System")
+    lines.append(f"- platform: `{system_info.platform}`")
+    lines.append(f"- gpu: `{system_info.gpu}` x `{system_info.gpu_count}`")
+    lines.append(f"- RAM: `{system_info.ram_mb} MB`")
+    lines.append(f"- VRAM: `{system_info.vram_mb} MB`")
+    lines.append(f"- thinking: `{'on' if thinking_enabled else 'off'}`")
+    lines.append("")
     lines.append("## Stacks")
     for stack in stacks:
         lines.append(f"- `{stack.slug}` on port `{stack.port}`")
@@ -429,6 +481,8 @@ def render_summary(
         for failure in failures:
             lines.append(f"- `{failure['stack']}`: {failure['error']}")
     lines.append("")
+    if thinking_enabled:
+        lines.append("Completion-token metrics include reasoning tokens when the runtime emits them.")
     lines.append("Metrics follow the same practical split used by current serving benchmarks: `TTFT`, decode-side token latency/throughput, and prompt-side throughput.")
     return "\n".join(lines)
 
@@ -449,6 +503,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parallel-requests", type=int, default=4)
     parser.add_argument("--long-prompt-repeats", type=int, default=256)
     parser.add_argument("--stacks", nargs="*", default=["llamacpp", "mlx-lm", "vllm-mlx", "vllm-metal", "omlx"])
+    parser.add_argument("--thinking", choices=("on", "off"), default="off")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -458,8 +513,10 @@ def main() -> int:
     selected = set(args.stacks)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    thinking_enabled = args.thinking == "on"
+    system_info = collect_system_info()
 
-    stacks = [stack for stack in build_stacks() if stack.slug in selected]
+    stacks = [stack for stack in build_stacks(thinking_enabled) if stack.slug in selected]
     scenarios = [
         ScenarioSpec(slug="short", prompt=SHORT_PROMPT),
         ScenarioSpec(slug="long", prompt=build_long_prompt(args.long_prompt_repeats)),
@@ -488,12 +545,12 @@ def main() -> int:
             sys.stdout.write(start.stdout)
             sys.stderr.write(start.stderr)
             model = pick_model("127.0.0.1", stack.port, stack.expected_model)
-            completion("127.0.0.1", stack.port, model, SHORT_PROMPT, min(args.max_tokens, 16))
+            completion("127.0.0.1", stack.port, model, SHORT_PROMPT, min(args.max_tokens, 16), thinking_enabled)
             for scenario in scenarios:
                 for iteration in range(1, args.iterations + 1):
-                    ttft, elapsed, data = stream_completion("127.0.0.1", stack.port, model, scenario.prompt, args.max_tokens)
+                    ttft, elapsed, data = stream_completion("127.0.0.1", stack.port, model, scenario.prompt, args.max_tokens, thinking_enabled)
                     raw_rows.append(summarize_record(stack, scenario, iteration, model, ttft, elapsed, data))
-            parallel = parallel_completion("127.0.0.1", stack.port, model, SHORT_PROMPT, args.max_tokens, args.parallel_requests)
+            parallel = parallel_completion("127.0.0.1", stack.port, model, SHORT_PROMPT, args.max_tokens, args.parallel_requests, thinking_enabled)
             parallel["stack"] = stack.slug
             parallel_rows.append(parallel)
         except Exception as exc:
@@ -504,7 +561,7 @@ def main() -> int:
             sys.stderr.write(stop.stderr)
 
     summary_rows = aggregate(raw_rows)
-    summary = render_summary(stacks, summary_rows, parallel_rows, failures)
+    summary = render_summary(system_info, stacks, summary_rows, parallel_rows, failures, thinking_enabled)
 
     (output_dir / "summary.md").write_text(summary)
     (output_dir / "raw.json").write_text(json.dumps(raw_rows, indent=2))
