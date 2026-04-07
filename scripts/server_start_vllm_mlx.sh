@@ -83,6 +83,13 @@ tool_call_parser="${VLLM_MLX_TOOL_CALL_PARSER:-$(python3 "${REGISTRY}" resolve "
 reasoning_parser="${VLLM_MLX_REASONING_PARSER:-$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field reasoning_parser)}"
 continuous_batching="${VLLM_MLX_CONTINUOUS_BATCHING:-$(python3 "${REGISTRY}" resolve "${MODEL_ALIAS}" --field continuous_batching)}"
 MAX_TOKENS="$(instance_var MAX_TOKENS "${default_max_tokens:-32768}")"
+MAX_NUM_SEQS="$(instance_var MAX_NUM_SEQS "")"
+PREFILL_BATCH_SIZE="$(instance_var PREFILL_BATCH_SIZE "")"
+COMPLETION_BATCH_SIZE="$(instance_var COMPLETION_BATCH_SIZE "")"
+STREAM_INTERVAL="$(instance_var STREAM_INTERVAL "")"
+PREFILL_STEP_SIZE="$(instance_var PREFILL_STEP_SIZE "")"
+CHUNKED_PREFILL_TOKENS="$(instance_var CHUNKED_PREFILL_TOKENS "")"
+ENABLE_PREFIX_CACHE="$(instance_var ENABLE_PREFIX_CACHE "")"
 
 PID_FILE="${RUN_DIR}/vllm-mlx-${INSTANCE}.pid"
 LOG_FILE="${RUN_DIR}/vllm-mlx-${INSTANCE}.log"
@@ -123,8 +130,32 @@ CMD=(
   --enable-auto-tool-choice
 )
 
+if [[ -n "${MAX_NUM_SEQS}" ]]; then
+  CMD+=(--max-num-seqs "${MAX_NUM_SEQS}")
+fi
+if [[ -n "${PREFILL_BATCH_SIZE}" ]]; then
+  CMD+=(--prefill-batch-size "${PREFILL_BATCH_SIZE}")
+fi
+if [[ -n "${COMPLETION_BATCH_SIZE}" ]]; then
+  CMD+=(--completion-batch-size "${COMPLETION_BATCH_SIZE}")
+fi
+if [[ -n "${STREAM_INTERVAL}" ]]; then
+  CMD+=(--stream-interval "${STREAM_INTERVAL}")
+fi
+if [[ -n "${PREFILL_STEP_SIZE}" ]]; then
+  CMD+=(--prefill-step-size "${PREFILL_STEP_SIZE}")
+fi
+if [[ -n "${CHUNKED_PREFILL_TOKENS}" ]]; then
+  CMD+=(--chunked-prefill-tokens "${CHUNKED_PREFILL_TOKENS}")
+fi
+
 if [[ "${continuous_batching}" == "true" ]]; then
   CMD+=(--continuous-batching)
+fi
+if [[ "${ENABLE_PREFIX_CACHE}" == "true" ]]; then
+  CMD+=(--enable-prefix-cache)
+elif [[ "${ENABLE_PREFIX_CACHE}" == "false" ]]; then
+  CMD+=(--disable-prefix-cache)
 fi
 
 if [[ -n "${tool_call_parser}" ]]; then

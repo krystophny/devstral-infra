@@ -75,6 +75,9 @@ def check_output(cmd: list[str], env: dict[str, str] | None = None) -> str:
     )
     return result.stdout
 
+def iteration_prompt(prompt: str, iteration: int) -> str:
+    return f"Benchmark iteration marker: {iteration}.\n\n{prompt}"
+
 def run(cmd: list[str], env: dict[str, str] | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
@@ -130,6 +133,8 @@ def build_stacks(thinking_enabled: bool) -> list[StackSpec]:
                 "DEVSTRAL_HOST": "127.0.0.1",
                 "LLAMACPP_MODEL": gguf_path,
                 "LLAMACPP_MODEL_ALIAS": "qwen3.5-9b-q4",
+                "LLAMACPP_BATCH": "2048",
+                "LLAMACPP_UBATCH": "2048",
                 "LLAMACPP_ENABLE_THINKING": thinking_value,
             },
         ),
@@ -144,6 +149,12 @@ def build_stacks(thinking_enabled: bool) -> list[StackSpec]:
                 "DEVSTRAL_HOST": "127.0.0.1",
                 "DEVSTRAL_PORT": "8091",
                 "MLX_LM_MODEL": mlx_path,
+                "MLX_LM_MAX_TOKENS": "32768",
+                "MLX_LM_DECODE_CONCURRENCY": "2",
+                "MLX_LM_PROMPT_CONCURRENCY": "2",
+                "MLX_LM_PREFILL_STEP_SIZE": "4096",
+                "MLX_LM_PROMPT_CACHE_SIZE": "32",
+                "MLX_LM_PROMPT_CACHE_BYTES": "8GB",
             },
         ),
         StackSpec(
@@ -162,6 +173,13 @@ def build_stacks(thinking_enabled: bool) -> list[StackSpec]:
                 "DEVSTRAL_PORT": "8092",
                 "VLLM_MLX_MODEL_ALIAS": "qwen3.5-9b-4bit",
                 "VLLM_MLX_CONTINUOUS_BATCHING": "false",
+                "VLLM_MLX_MAX_NUM_SEQS": "2",
+                "VLLM_MLX_PREFILL_BATCH_SIZE": "2",
+                "VLLM_MLX_COMPLETION_BATCH_SIZE": "2",
+                "VLLM_MLX_STREAM_INTERVAL": "1",
+                "VLLM_MLX_PREFILL_STEP_SIZE": "4096",
+                "VLLM_MLX_CHUNKED_PREFILL_TOKENS": "0",
+                "VLLM_MLX_ENABLE_PREFIX_CACHE": "true",
                 "VLLM_MLX_ENABLE_THINKING": thinking_value,
             },
         ),
@@ -190,6 +208,10 @@ def build_stacks(thinking_enabled: bool) -> list[StackSpec]:
                 "DEVSTRAL_PORT": "8094",
                 "OMLX_MODEL_PATH": mlx_path,
                 "OMLX_MODEL_ID": "qwen3.5-9b-4bit",
+                "OMLX_MAX_NUM_SEQS": "2",
+                "OMLX_COMPLETION_BATCH_SIZE": "2",
+                "OMLX_HOT_CACHE_MAX_SIZE": "4GB",
+                "OMLX_INITIAL_CACHE_BLOCKS": "1024",
             },
             expected_model="qwen3.5-9b-4bit",
         ),
@@ -253,64 +275,105 @@ def _parse_stream_json_line(line: str) -> dict[str, Any] | None:
         return json.loads(stripped)
     return None
 
+def _is_transient_http_error(exc: BaseException) -> bool:
+    return isinstance(
+        exc,
+        (
+            http.client.RemoteDisconnected,
+            ConnectionResetError,
+            BrokenPipeError,
+            TimeoutError,
+        ),
+    )
+
 def stream_completion(host: str, port: int, model: str, prompt: str, max_tokens: int, thinking_enabled: bool) -> tuple[float, float, dict[str, Any]]:
     body = json.dumps(payload(model, prompt, max_tokens, True, thinking_enabled))
-    conn = http.client.HTTPConnection(host, port, timeout=600)
-    start = time.perf_counter()
-    conn.request("POST", "/v1/chat/completions", body=body, headers={"Content-Type": "application/json"})
-    response = conn.getresponse()
-    content_type = response.getheader("Content-Type", "")
-    if response.status != 200:
-        data = response.read().decode(errors="replace")
-        conn.close()
-        raise RuntimeError(f"stream request failed with {response.status}: {data}")
+    last_error: BaseException | None = None
+    for attempt in range(2):
+        conn = http.client.HTTPConnection(host, port, timeout=600)
+        start = time.perf_counter()
+        try:
+            conn.request("POST", "/v1/chat/completions", body=body, headers={"Content-Type": "application/json"})
+            response = conn.getresponse()
+            content_type = response.getheader("Content-Type", "")
+            if response.status != 200:
+                data = response.read().decode(errors="replace")
+                raise RuntimeError(f"stream request failed with {response.status}: {data}")
 
-    if "text/event-stream" not in content_type:
-        raw = response.read()
-        elapsed = time.perf_counter() - start
-        conn.close()
-        data = json.loads(raw)
-        return elapsed, elapsed, data
+            if "text/event-stream" not in content_type:
+                raw = response.read()
+                elapsed = time.perf_counter() - start
+                data = json.loads(raw)
+                return elapsed, elapsed, data
 
-    ttft = None
-    usage: dict[str, Any] = {}
-    done_elapsed = None
-    while True:
-        raw_line = response.fp.readline()
-        if not raw_line:
-            break
-        line = raw_line.decode("utf-8", errors="replace").strip()
-        if line == "data: [DONE]" or line == "[DONE]":
-            done_elapsed = time.perf_counter() - start
-            break
-        parsed = _parse_stream_json_line(line)
-        if parsed is None:
-            continue
-        if parsed.get("usage"):
-            usage = parsed["usage"]
-        choices = parsed.get("choices", [])
-        if choices:
-            delta = choices[0].get("delta", {})
-            if ttft is None and _delta_has_token(delta):
-                ttft = time.perf_counter() - start
-    conn.close()
-    elapsed = done_elapsed if done_elapsed is not None else (time.perf_counter() - start)
-    if ttft is None:
-        ttft = elapsed
-    return ttft, elapsed, {"usage": usage}
+            ttft = None
+            usage: dict[str, Any] = {}
+            done_elapsed = None
+            while True:
+                raw_line = response.fp.readline()
+                if not raw_line:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if line == "data: [DONE]" or line == "[DONE]":
+                    done_elapsed = time.perf_counter() - start
+                    break
+                parsed = _parse_stream_json_line(line)
+                if parsed is None:
+                    continue
+                if parsed.get("usage"):
+                    usage = parsed["usage"]
+                choices = parsed.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    if ttft is None and _delta_has_token(delta):
+                        ttft = time.perf_counter() - start
+            elapsed = done_elapsed if done_elapsed is not None else (time.perf_counter() - start)
+            if ttft is None:
+                ttft = elapsed
+            return ttft, elapsed, {"usage": usage}
+        except BaseException as exc:
+            conn.close()
+            if attempt == 1 or not _is_transient_http_error(exc):
+                raise
+            last_error = exc
+            time.sleep(0.25)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("stream request failed without an explicit error")
 
 def completion(host: str, port: int, model: str, prompt: str, max_tokens: int, thinking_enabled: bool) -> tuple[float, dict[str, Any]]:
     body = json.dumps(payload(model, prompt, max_tokens, False, thinking_enabled))
-    conn = http.client.HTTPConnection(host, port, timeout=600)
-    start = time.perf_counter()
-    conn.request("POST", "/v1/chat/completions", body=body, headers={"Content-Type": "application/json"})
-    response = conn.getresponse()
-    data = response.read()
-    elapsed = time.perf_counter() - start
-    conn.close()
-    if response.status != 200:
-        raise RuntimeError(f"completion request failed with {response.status}: {data.decode(errors='replace')}")
-    return elapsed, json.loads(data)
+    last_error: BaseException | None = None
+    for attempt in range(2):
+        conn = http.client.HTTPConnection(host, port, timeout=600)
+        start = time.perf_counter()
+        try:
+            conn.request("POST", "/v1/chat/completions", body=body, headers={"Content-Type": "application/json"})
+            response = conn.getresponse()
+            data = response.read()
+            elapsed = time.perf_counter() - start
+            if response.status != 200:
+                raise RuntimeError(f"completion request failed with {response.status}: {data.decode(errors='replace')}")
+            return elapsed, json.loads(data)
+        except BaseException as exc:
+            conn.close()
+            if attempt == 1 or not _is_transient_http_error(exc):
+                raise
+            last_error = exc
+            time.sleep(0.25)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("completion request failed without an explicit error")
 
 def parallel_completion(
     host: str,
@@ -521,7 +584,8 @@ def main() -> int:
             completion("127.0.0.1", stack.port, model, SHORT_PROMPT, min(args.max_tokens, 16), thinking_enabled)
             for scenario in scenarios:
                 for iteration in range(1, args.iterations + 1):
-                    ttft, elapsed, data = stream_completion("127.0.0.1", stack.port, model, scenario.prompt, args.max_tokens, thinking_enabled)
+                    prompt = iteration_prompt(scenario.prompt, iteration)
+                    ttft, elapsed, data = stream_completion("127.0.0.1", stack.port, model, prompt, args.max_tokens, thinking_enabled)
                     raw_rows.append(summarize_record(stack, scenario, iteration, model, ttft, elapsed, data))
             parallel = parallel_completion("127.0.0.1", stack.port, model, SHORT_PROMPT, args.max_tokens, args.parallel_requests, thinking_enabled)
             parallel["stack"] = stack.slug
