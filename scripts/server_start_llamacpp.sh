@@ -181,6 +181,7 @@ SAMPLER_REPEAT_PENALTY=""
 SAMPLER_REASONING_FORMAT=""
 SAMPLER_REASONING_MODE=""
 SAMPLER_NO_CONTEXT_SHIFT="false"
+CHAT_TEMPLATE_FILE=""
 
 case "${MODEL_ALIAS}" in
   qwen3.5-*|qwen3-coder-*)
@@ -196,10 +197,18 @@ case "${MODEL_ALIAS}" in
     ;;
   gemma-4-*)
     # Official Gemma 4 best-practice sampling configuration.
+    # Use interleaved template for agentic flow (preserves reasoning before tool calls).
+    # Set min-p 0.0 to override llama.cpp default of 0.05.
     SAMPLER_TEMP="1.0"
     SAMPLER_TOP_P="0.95"
     SAMPLER_TOP_K="64"
+    SAMPLER_MIN_P="0.0"
     SAMPLER_REASONING_MODE="on"
+    _llama_src="$(cd "$(dirname "${LLAMA_SERVER}")/../.." && pwd)"
+    _tpl="${_llama_src}/models/templates/google-gemma-4-31B-it-interleaved.jinja"
+    if [[ -f "${_tpl}" ]]; then
+      CHAT_TEMPLATE_FILE="${_tpl}"
+    fi
     ;;
   minimax-*)
     # Official MiniMax-M2.5 inference parameters.
@@ -295,6 +304,7 @@ if [[ "${PRINT_EXEC_START}" != "true" ]]; then
   if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then echo "- Reasoning format: ${SAMPLER_REASONING_FORMAT}"; fi
   if [[ -n "${SAMPLER_REASONING_MODE}" ]]; then echo "- Reasoning mode: ${SAMPLER_REASONING_MODE}"; fi
   if [[ "${SAMPLER_NO_CONTEXT_SHIFT}" == "true" ]]; then echo "- Context shift: disabled"; fi
+  if [[ -n "${CHAT_TEMPLATE_FILE}" ]]; then echo "- Chat template: ${CHAT_TEMPLATE_FILE}"; fi
   echo "- Smoke test: ${SMOKE_TEST}"
   if [[ -n "${HTTP_TRACE_DIR}" ]]; then
     echo "- HTTP trace dir: ${HTTP_TRACE_DIR}"
@@ -330,6 +340,10 @@ CMD+=(
   --jinja                    # Enable Jinja templating
 )
 
+if [[ -n "${CHAT_TEMPLATE_FILE}" ]]; then
+  CMD+=(--chat-template-file "${CHAT_TEMPLATE_FILE}")
+fi
+
 if [[ -n "${SAMPLER_TEMP}" ]]; then
   CMD+=(--temp "${SAMPLER_TEMP}")
 fi
@@ -358,7 +372,7 @@ if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then
   CMD+=(--reasoning-format "${SAMPLER_REASONING_FORMAT}")
 fi
 
-if [[ -n "${SAMPLER_REASONING_MODE}" && "${supports_reasoning_toggle}" == "true" ]]; then
+if [[ -n "${SAMPLER_REASONING_MODE}" && "${supports_reasoning_toggle}" == "true" && "${ENABLE_THINKING}" != "true" ]]; then
   CMD+=(--reasoning "${SAMPLER_REASONING_MODE}")
 fi
 
