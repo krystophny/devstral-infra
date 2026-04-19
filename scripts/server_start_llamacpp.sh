@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start llama.cpp server with the validated local Qwen3.5 OpenCode profile.
+# Start llama.cpp server with the validated local Qwen/OpenCode profile.
 # Usage: server_start_llamacpp.sh [instance]
 #   instance: "local" (default, port 8080, thinking on) or "fast" (port 8081, thinking on)
 #   Also settable via LLAMACPP_INSTANCE env var.
@@ -98,6 +98,7 @@ PID_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.pid"
 LOG_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.log"
 PORT_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.port"
 START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
+LAUNCHER="${LLAMACPP_LAUNCHER:-auto}"
 
 # Model configuration.
 usable_mb="$(detect_vram_mb)"
@@ -130,6 +131,8 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-27b) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q8_0" ;;
         qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
         qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
+        qwen3.6-35b-a3b) HF_MODEL="unsloth/Qwen3.6-35B-A3B-GGUF:Q8_0" ;;
+        qwen3.6-35b-a3b-q4) HF_MODEL="bartowski/Qwen/Qwen3.6-35B-A3B-GGUF:Q4_K_M" ;;
         minimax-m2.5-q4) HF_MODEL="AesSedai/MiniMax-M2.5-GGUF:Q4_K_M" ;;
         gemma-4-31b-it) HF_MODEL="ggml-org/gemma-4-31B-it-GGUF:Q8_0" ;;
         gemma-4-26b-a4b-it) HF_MODEL="ggml-org/gemma-4-26B-A4B-it-GGUF:Q8_0" ;;
@@ -184,7 +187,7 @@ SAMPLER_NO_CONTEXT_SHIFT="false"
 CHAT_TEMPLATE_FILE=""
 
 case "${MODEL_ALIAS}" in
-  qwen3.5-*|qwen3-coder-*)
+  qwen3.5-*|qwen3.6-*|qwen3-coder-*)
     # Official Qwen coding/llama.cpp preset.
     SAMPLER_TEMP="0.6"
     SAMPLER_TOP_P="0.95"
@@ -239,12 +242,12 @@ if [[ "${DRY_RUN}" != "true" && "${PRINT_EXEC_START}" != "true" && -f "${PID_FIL
   fi
   rm -f "${PID_FILE}"
 fi
-# Safety: ensure port is free (kill orphans from stale PID files or crashed launchd)
+# Safety: ensure the managed port is free before starting.
 if [[ "${DRY_RUN}" != "true" && "${PRINT_EXEC_START}" != "true" ]]; then
-  orphan_pids="$(lsof -ti ":${PORT}" 2>/dev/null || true)"
-  if [[ -n "${orphan_pids}" ]]; then
-    echo "WARNING: port ${PORT} occupied by orphan process(es), killing..."
-    echo "${orphan_pids}" | xargs kill -9 2>/dev/null || true
+  port_pids="$(port_listener_pids "${PORT}")"
+  if [[ -n "${port_pids}" ]]; then
+    echo "WARNING: port ${PORT} is already occupied; stopping existing llama.cpp listener(s)..."
+    stop_llamacpp_port_occupants "${PORT}" "pre-start llama.cpp [${INSTANCE}]"
     sleep 2
   fi
 fi
@@ -429,27 +432,62 @@ if [[ "${DRY_RUN}" == "true" ]]; then
   exit 0
 fi
 
+: > "${LOG_FILE}"
+
 # Start server via native service manager
 LAUNCHD_LABEL="com.devstral.llamacpp-${INSTANCE}"
 SYSTEMD_UNIT="devstral-llamacpp-${INSTANCE}"
 platform="$(detect_platform)"
 
 if [[ "${platform}" == "mac" ]]; then
-  # macOS: launchd user agent
+  if [[ "${LAUNCHER}" != "auto" && "${LAUNCHER}" != "launchd" && "${LAUNCHER}" != "background" ]]; then
+    die "invalid LLAMACPP_LAUNCHER for macOS: ${LAUNCHER} (expected: auto, launchd, background)"
+  fi
   PLIST_PATH="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
   launchctl unload "${PLIST_PATH}" 2>/dev/null || true
 
-  mkdir -p "${HOME}/Library/LaunchAgents"
-  local_args_xml=""
-  for arg in "${CMD[@]}"; do
-    arg="${arg//&/&amp;}"
-    arg="${arg//</&lt;}"
-    arg="${arg//>/&gt;}"
-    local_args_xml+="      <string>${arg}</string>
-"
-  done
+  start_background() {
+    pid="$(
+      python3 - "${LOG_FILE}" "${CMD[@]}" <<'PY'
+import subprocess
+import sys
 
-  cat > "${PLIST_PATH}" <<PLIST
+log_path = sys.argv[1]
+cmd = sys.argv[2:]
+
+with open(log_path, "ab", buffering=0) as log_file:
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+    print(proc.pid)
+PY
+    )"
+    if [[ -z "${pid}" ]]; then
+      die "failed to launch detached llama.cpp background process"
+    fi
+    echo "- managed by: background process"
+  }
+
+  if [[ "${LAUNCHER}" == "background" ]]; then
+    start_background
+  else
+    # macOS: launchd user agent
+    mkdir -p "${HOME}/Library/LaunchAgents"
+    local_args_xml=""
+    for arg in "${CMD[@]}"; do
+      arg="${arg//&/&amp;}"
+      arg="${arg//</&lt;}"
+      arg="${arg//>/&gt;}"
+      local_args_xml+="      <string>${arg}</string>
+"
+    done
+
+    cat > "${PLIST_PATH}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -477,44 +515,25 @@ ${local_args_xml}  </array>
 </plist>
 PLIST
 
-  if launchctl load "${PLIST_PATH}" 2>/dev/null; then
-    sleep 1
-    pid="$(launchctl print "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null | awk '/\tpid = / {print $3; exit}')"
-    if [[ -z "${pid}" || "${pid}" == "-" ]]; then
-      die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
+    if launchctl load "${PLIST_PATH}" 2>/dev/null; then
+      sleep 1
+      pid="$(launchctl print "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null | awk '/\tpid = / {print $3; exit}')"
+      if [[ -z "${pid}" || "${pid}" == "-" ]]; then
+        die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
+      fi
+      echo "- managed by: launchd (${LAUNCHD_LABEL})"
+    elif [[ "${LAUNCHER}" == "launchd" ]]; then
+      die "launchd failed to start ${LAUNCHD_LABEL}. Re-run with LLAMACPP_LAUNCHER=background if you are in an SSH/non-GUI session."
+    else
+      start_background
     fi
-    echo "- managed by: launchd (${LAUNCHD_LABEL})"
-  else
-    # launchctl load fails from SSH sessions (macOS security restriction).
-    # Fall back to a detached child process started in a new session.
-    pid="$(
-      python3 - "${LOG_FILE}" "${CMD[@]}" <<'PY'
-import subprocess
-import sys
-
-log_path = sys.argv[1]
-cmd = sys.argv[2:]
-
-with open(log_path, "ab", buffering=0) as log_file:
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        close_fds=True,
-    )
-    print(proc.pid)
-PY
-    )"
-    if [[ -z "${pid}" ]]; then
-      die "failed to launch detached llama.cpp background process"
-    fi
-    echo "- managed by: background process (launchd plist installed for future use)"
   fi
 
 else
   # Linux/WSL: systemd user unit
+  if [[ "${LAUNCHER}" != "auto" && "${LAUNCHER}" != "systemd" ]]; then
+    die "invalid LLAMACPP_LAUNCHER for Linux/WSL: ${LAUNCHER} (expected: auto, systemd)"
+  fi
   if ! command -v systemctl >/dev/null 2>&1; then
     die "systemctl not found. systemd is required on Linux."
   fi

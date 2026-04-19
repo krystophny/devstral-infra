@@ -22,6 +22,52 @@ have() {
   command -v "$1" >/dev/null 2>&1
 }
 
+pid_command() {
+  local pid="$1"
+  ps -p "${pid}" -o command= 2>/dev/null || true
+}
+
+port_listener_pids() {
+  local port="$1"
+  lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true
+}
+
+stop_pid() {
+  local pid="$1"
+  local label="${2:-process}"
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    return 0
+  fi
+  kill "${pid}" 2>/dev/null || true
+  for _ in {1..30}; do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  warn "${label} pid ${pid} did not exit after SIGTERM; sending SIGKILL"
+  kill -9 "${pid}" 2>/dev/null || true
+}
+
+stop_llamacpp_port_occupants() {
+  local port="$1"
+  local label="${2:-llama.cpp server}"
+  local pids pid cmd
+  pids="$(port_listener_pids "${port}")"
+  if [[ -z "${pids}" ]]; then
+    return 0
+  fi
+  while IFS= read -r pid; do
+    [[ -n "${pid}" ]] || continue
+    cmd="$(pid_command "${pid}")"
+    if [[ "${cmd}" != *"llama-server"* ]]; then
+      die "port ${port} is occupied by a non-llama process (pid ${pid}: ${cmd})"
+    fi
+    echo "stopping ${label} on port ${port} (pid ${pid})..."
+    stop_pid "${pid}" "${label}"
+  done <<< "${pids}"
+}
+
 detect_platform() {
   local uname_s
   uname_s="$(uname -s)"

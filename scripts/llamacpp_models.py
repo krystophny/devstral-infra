@@ -37,6 +37,8 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec("qwen3.5-27b", "qwen", "lmstudio-community/Qwen3.5-27B-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("qwen3.5-35b-a3b", "qwen", "lmstudio-community/Qwen3.5-35B-A3B-GGUF", ("*Q8_0*.gguf",), True, True),
     ModelSpec("qwen3.5-122b-a10b", "qwen", "lmstudio-community/Qwen3.5-122B-A10B-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("qwen3.6-35b-a3b", "qwen", "unsloth/Qwen3.6-35B-A3B-GGUF", ("*Q8_0*.gguf",), True),
+    ModelSpec("qwen3.6-35b-a3b-q4", "qwen", "bartowski/Qwen/Qwen3.6-35B-A3B-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("minimax-m2.5-q4", "minimax", "AesSedai/MiniMax-M2.5-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("gemma-4-31b-it", "gemma", "ggml-org/gemma-4-31B-it-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("gemma-4-26b-a4b-it", "gemma", "ggml-org/gemma-4-26B-A4B-it-GGUF", ("*Q8_0*.gguf",), True),

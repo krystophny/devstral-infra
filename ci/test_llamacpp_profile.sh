@@ -122,6 +122,60 @@ EOF
   fi
 }
 
+test_qwen36_alias_profiles() {
+  echo "TEST: Qwen 3.6 benchmark aliases keep the Qwen llama.cpp profile"
+
+  local home_dir="${TMPDIR}/home-qwen36"
+  mkdir -p "${home_dir}/.local/llama.cpp" "${home_dir}/.cache"
+  cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${home_dir}/.local/llama.cpp/llama-server"
+
+  local q8
+  q8="$(
+    HOME="${home_dir}" \
+    LLAMACPP_DRY_RUN=true \
+    LLAMACPP_SMOKE_TEST=false \
+    LLAMACPP_MODEL_ALIAS=qwen3.6-35b-a3b \
+    LLAMACPP_MODEL="${TMPDIR}/Qwen3.6-35B-A3B-Q8_0.gguf" \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  local q4
+  q4="$(
+    HOME="${home_dir}" \
+    LLAMACPP_DRY_RUN=true \
+    LLAMACPP_SMOKE_TEST=false \
+    LLAMACPP_MODEL_ALIAS=qwen3.6-35b-a3b-q4 \
+    LLAMACPP_MODEL="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf" \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  if [[ "${q8}" == *"--temp 0.6"* && \
+        "${q8}" == *"--top-p 0.95"* && \
+        "${q8}" == *"--top-k 20"* && \
+        "${q8}" == *"--min-p 0"* && \
+        "${q8}" == *"--reasoning-format deepseek"* && \
+        "${q8}" == *"Qwen3.6-35B-A3B-Q8_0.gguf"* && \
+        "${q4}" == *"--temp 0.6"* && \
+        "${q4}" == *"--top-p 0.95"* && \
+        "${q4}" == *"--top-k 20"* && \
+        "${q4}" == *"--min-p 0"* && \
+        "${q4}" == *"--reasoning-format deepseek"* && \
+        "${q4}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* ]]; then
+    echo "PASS: Qwen 3.6 q8/q4 aliases share the expected benchmark runtime settings"
+  else
+    echo "FAIL: Qwen 3.6 alias launcher profile mismatch"
+    echo "--- q8 ---"
+    echo "${q8}"
+    echo "--- q4 ---"
+    echo "${q4}"
+    return 1
+  fi
+}
+
 test_opencode_config() {
   echo "TEST: OpenCode llama.cpp config generation"
 
@@ -458,6 +512,7 @@ echo "=== llama.cpp Profile Tests ==="
 
 test_server_start_dry_run || FAILED=1
 test_server_start_family_profiles || FAILED=1
+test_qwen36_alias_profiles || FAILED=1
 test_dual_instance_dry_run || FAILED=1
 test_exec_start_output || FAILED=1
 test_opencode_config || FAILED=1

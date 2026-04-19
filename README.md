@@ -12,7 +12,7 @@ License: [MIT](LICENSE)
 - **Tool calling**: Full tool use support for coding assistants
 - **Vibe integration**: Configure Mistral Vibe CLI to use your local server
 - **OpenCode integration**: Configure OpenCode CLI for efficient tool calling
-- **llama.cpp local benchmark profile**: Uses a real local build from upstream `llama.cpp` `master`, standardizes Qwen on `Q8_0`, and supports official `GPT-OSS` `MXFP4`
+- **llama.cpp local benchmark profile**: Uses a real local build from upstream `llama.cpp` `master`, standardizes benchmark Qwen lanes on explicit aliases and cache paths, and supports official `GPT-OSS` `MXFP4`
 - **Security hardening**: Optional network isolation for Vibe, OpenCode, and LM Studio
 
 ## Quick Start
@@ -128,7 +128,7 @@ scripts/opencode_set_llamacpp.sh
 Recommended local profile:
 - default OpenCode model: `Qwen3.5-9B`
 - default OpenCode llama.cpp endpoint: `http://127.0.0.1:8081/v1`
-- supported local Qwen family: `0.8B`, `2B`, `4B`, `9B`, `27B`, `35B-A3B`, `122B-A10B`
+- supported local Qwen family: `0.8B`, `2B`, `4B`, `9B`, `27B`, `35B-A3B`, `122B-A10B`, plus benchmark aliases `qwen3.6-35b-a3b` (`Q8_0`) and `qwen3.6-35b-a3b-q4` (`Q4_K_M`)
 - supported local GPT-OSS family: `20B` `MXFP4`, `120B` `MXFP4`
 - context: `65536`
 - context checkpoints: `64`
@@ -140,6 +140,7 @@ Recommended local profile:
 - OpenCode sampling defaults for precise coding: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
 - OpenCode permissions: `allow` by default for the generated local profile
 - launcher: `launchd` user agent on macOS, `systemd --user` on Linux
+- optional launcher override: `LLAMACPP_LAUNCHER=background` to avoid `launchd` state during SSH or benchmark automation
 - readiness gate: waits for `/v1/models`, not just `/health`
 - startup now runs a real `POST /v1/chat/completions` smoke test and fails fast if inference is broken
 - verify the actual `llama-server` binary version before drawing conclusions; stale local builds were a major source of earlier confusion
@@ -148,6 +149,7 @@ Recommended local profile:
 - use `scripts/llamacpp_prefetch_models.sh --mode benchmark` to prefetch the active benchmark set
 - use `scripts/llamacpp_model_inventory.sh --json` to inspect exact resolved paths
 - use `LLAMACPP_MODEL_ALIAS=<alias>` to switch benchmark models without changing scripts
+- benchmark note: `qwen3.6-35b-a3b` resolves to the cached `unsloth/Qwen3.6-35B-A3B-GGUF` `Q8_0` GGUF, while `qwen3.6-35b-a3b-q4` resolves to the cached `bartowski/Qwen/Qwen3.6-35B-A3B-GGUF` `Q4_K_M` GGUF with the same llama.cpp runtime settings
 
 Environment overrides:
 - `LLAMACPP_SERVER_BIN`
