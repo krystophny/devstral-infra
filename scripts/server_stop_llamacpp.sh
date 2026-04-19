@@ -44,19 +44,20 @@ stop_instance() {
     if launchctl list "${launchd_label}" >/dev/null 2>&1; then
       echo "stopping llama.cpp [${inst}] (launchd: ${launchd_label})..."
       launchctl unload "${plist_path}" 2>/dev/null || true
+      local port
+      if [[ "${inst}" == "local" ]]; then port=8080; else port=8081; fi
+      stop_llamacpp_port_occupants "${port}" "launchd llama.cpp [${inst}]"
       rm -f "${pid_file}" "${port_file}"
       echo "stopped"
       return 0
     fi
+    local port
+    if [[ "${inst}" == "local" ]]; then port=8080; else port=8081; fi
     if [[ ! -f "${pid_file}" ]]; then
-      # Fallback: kill by port if PID file is missing but server is running
-      local port
-      if [[ "${inst}" == "local" ]]; then port=8080; else port=8081; fi
-      local orphan_pids
-      orphan_pids="$(lsof -ti ":${port}" 2>/dev/null || true)"
-      if [[ -n "${orphan_pids}" ]]; then
+      # Fallback: stop by port if PID file is missing but server is running.
+      if [[ -n "$(port_listener_pids "${port}")" ]]; then
         echo "stopping orphan llama.cpp [${inst}] on port ${port} (PID file missing)..."
-        echo "${orphan_pids}" | xargs kill -9 2>/dev/null || true
+        stop_llamacpp_port_occupants "${port}" "orphan llama.cpp [${inst}]"
         sleep 2
         echo "stopped (orphan)"
         return 0
@@ -67,20 +68,17 @@ stop_instance() {
     local pid
     pid="$(cat "${pid_file}")"
     if ! kill -0 "${pid}" 2>/dev/null; then
-      echo "[${inst}] not running (stale pid file)"
+      if [[ -n "$(port_listener_pids "${port}")" ]]; then
+        echo "stopping stale-port llama.cpp [${inst}] on port ${port}..."
+        stop_llamacpp_port_occupants "${port}" "stale-port llama.cpp [${inst}]"
+      else
+        echo "[${inst}] not running (stale pid file)"
+      fi
       rm -f "${pid_file}" "${port_file}"
       return 0
     fi
     echo "stopping llama.cpp [${inst}] (pid ${pid})..."
-    kill "${pid}" 2>/dev/null || true
-    for _ in {1..30}; do
-      if ! kill -0 "${pid}" 2>/dev/null; then break; fi
-      sleep 1
-    done
-    if kill -0 "${pid}" 2>/dev/null; then
-      echo "force killing..."
-      kill -9 "${pid}" 2>/dev/null || true
-    fi
+    stop_pid "${pid}" "llama.cpp [${inst}]"
     rm -f "${pid_file}" "${port_file}"
     echo "stopped"
   else
