@@ -134,6 +134,7 @@ Recommended local profile:
 - context checkpoints: `64`
 - checkpoint interval: `4096`
 - batch / ubatch: `2048 / 512`
+- KV cache quantization: `K=q8_0`, `V=q8_0` by default unless explicit `-ctk` / `-ctv` flags override it
 - thinking: `on` by default for the OpenCode fast profile
 - WebUI: enabled by default on the llama.cpp server
 - clients that need a fast non-thinking turn should disable thinking per request instead of forcing the server off globally
