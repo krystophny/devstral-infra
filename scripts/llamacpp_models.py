@@ -51,6 +51,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec("qwen3.5-27b-q4km", "qwen", "lmstudio-community/Qwen3.5-27B-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("qwen3.5-35b-a3b", "qwen", "lmstudio-community/Qwen3.5-35B-A3B-GGUF", ("*Q8_0*.gguf",), True, True),
     ModelSpec("qwen3.5-35b-a3b-q4km", "qwen", "unsloth/Qwen3.5-35B-A3B-GGUF", ("*Q4_K_M*.gguf",), True),
+    ModelSpec("qwen3.5-35b-a3b-q4", "qwen", "bartowski/Qwen_Qwen3.5-35B-A3B-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("qwen3.6-35b-a3b", "qwen", "unsloth/Qwen3.6-35B-A3B-GGUF", ("*Q8_0*.gguf",), True),
     ModelSpec("qwen3.6-35b-a3b-q4", "qwen", "bartowski/Qwen_Qwen3.6-35B-A3B-GGUF", ("*Q4_K_M*.gguf",), True),
     ModelSpec("qwen3.6-35b-a3b-q4km", "qwen", "bartowski/Qwen_Qwen3.6-35B-A3B-GGUF", ("*Q4_K_M*.gguf",), True),
@@ -78,6 +79,7 @@ AGAI_SUPPORTED_ALIASES = (
     "qwen3.5-27b-q4km",
     "qwen3-coder-30b-a3b-q4km",
     "qwen3.5-35b-a3b-q4km",
+    "qwen3.5-35b-a3b-q4",
     "qwen3.6-35b-a3b-q4km",
 )
 
