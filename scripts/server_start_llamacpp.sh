@@ -107,6 +107,7 @@ PID_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.pid"
 LOG_FILE="${LOG_DIR}/llamacpp-${INSTANCE}.log"
 PORT_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.port"
 START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
+SERVED_MODEL_NAME="$(instance_var SERVED_MODEL_NAME "")"
 
 # Model configuration.
 usable_mb="$(detect_vram_mb)"
@@ -133,7 +134,8 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-27b-q4km) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q4_K_M" ;;
         qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
         qwen3.5-35b-a3b-q4km) HF_MODEL="unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_M" ;;
-        qwen3.6-35b-a3b-q4km) HF_MODEL="bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q4_K_M" ;;
+        qwen3.6-35b-a3b) HF_MODEL="unsloth/Qwen3.6-35B-A3B-GGUF:Q8_0" ;;
+        qwen3.6-35b-a3b-q4|qwen3.6-35b-a3b-q4km) HF_MODEL="bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q4_K_M" ;;
         qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
         gpt-oss-20b) HF_MODEL="ggml-org/gpt-oss-20b-GGUF" ;;
         gpt-oss-120b) HF_MODEL="ggml-org/gpt-oss-120b-GGUF" ;;
@@ -216,6 +218,9 @@ else
   echo "- Model: ${HF_MODEL} (HuggingFace, will download if needed)"
 fi
 echo "- Model alias: ${MODEL_ALIAS}"
+if [[ -n "${SERVED_MODEL_NAME}" ]]; then
+  echo "- Served model name: ${SERVED_MODEL_NAME}"
+fi
 echo "- Context: ${CONTEXT_SIZE} tokens"
 echo "- Context checkpoints: ${CTX_CHECKPOINTS}"
 if [[ "${supports_checkpoint_interval}" == "true" ]]; then
@@ -241,6 +246,10 @@ if [[ -n "${MODEL_PATH}" ]]; then
   CMD+=(-m "${MODEL_PATH}")
 else
   CMD+=(-hf "${HF_MODEL}")
+fi
+
+if [[ -n "${SERVED_MODEL_NAME}" ]]; then
+  CMD+=(-a "${SERVED_MODEL_NAME}")
 fi
 
 CMD+=(
