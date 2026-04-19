@@ -174,6 +174,14 @@ DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
 PRINT_EXEC_START="${LLAMACPP_PRINT_EXEC_START:-false}"
 HTTP_TRACE_DIR="${LLAMACPP_HTTP_TRACE_DIR:-}"
 HTTP_TRACE_MAX_BYTES="${LLAMACPP_HTTP_TRACE_MAX_BYTES:-}"
+EFFECTIVE_EXTRA_FLAGS="${LLAMACPP_EXTRA_FLAGS:-}"
+
+if [[ " ${EFFECTIVE_EXTRA_FLAGS} " != *" -ctk "* && " ${EFFECTIVE_EXTRA_FLAGS} " != *" --cache-type-k "* ]]; then
+  EFFECTIVE_EXTRA_FLAGS="${EFFECTIVE_EXTRA_FLAGS:+${EFFECTIVE_EXTRA_FLAGS} }-ctk q8_0"
+fi
+if [[ " ${EFFECTIVE_EXTRA_FLAGS} " != *" -ctv "* && " ${EFFECTIVE_EXTRA_FLAGS} " != *" --cache-type-v "* ]]; then
+  EFFECTIVE_EXTRA_FLAGS="${EFFECTIVE_EXTRA_FLAGS:+${EFFECTIVE_EXTRA_FLAGS} }-ctv q8_0"
+fi
 
 SAMPLER_TEMP=""
 SAMPLER_TOP_P=""
@@ -312,6 +320,9 @@ if [[ "${PRINT_EXEC_START}" != "true" ]]; then
   if [[ -n "${HTTP_TRACE_DIR}" ]]; then
     echo "- HTTP trace dir: ${HTTP_TRACE_DIR}"
   fi
+  if [[ -n "${EFFECTIVE_EXTRA_FLAGS}" ]]; then
+    echo "- Extra flags: ${EFFECTIVE_EXTRA_FLAGS}"
+  fi
   if [[ -n "${MOE_OFFLOAD}" ]]; then
     echo "- tensor offload rule: ${MOE_OFFLOAD}"
   fi
@@ -413,10 +424,10 @@ if [[ -n "${HTTP_TRACE_MAX_BYTES}" ]]; then
   CMD+=(--http-trace-max-bytes "${HTTP_TRACE_MAX_BYTES}")
 fi
 
-# Add extra flags if specified
-if [[ -n "${LLAMACPP_EXTRA_FLAGS:-}" ]]; then
+# Add extra flags if specified or defaulted
+if [[ -n "${EFFECTIVE_EXTRA_FLAGS}" ]]; then
   # shellcheck disable=SC2206
-  CMD+=(${LLAMACPP_EXTRA_FLAGS})
+  CMD+=(${EFFECTIVE_EXTRA_FLAGS})
 fi
 
 if [[ "${PRINT_EXEC_START}" == "true" ]]; then
