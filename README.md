@@ -32,7 +32,9 @@ The installer copies `llama.cpp/`, `opencode/`, and the model into the user
 profile (`~/.local/qwenstack` on Linux, `~/Library/Application Support/qwenstack`
 on macOS, `%USERPROFILE%\qwenstack` on Windows), registers a user-level service
 (`systemd --user`, `launchd`, or a logon-triggered `schtasks`), and writes the
-OpenCode config. OpenCode points at `http://127.0.0.1:8080/v1`.
+OpenCode config. OpenCode points at `http://127.0.0.1:8080/v1` inside the
+bundle, or at `http://127.0.0.1:8081/v1` when running from this repo's scripts
+(the local development box has another service bound to 8080).
 
 ## Install from this repo (local development)
 

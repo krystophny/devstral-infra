@@ -45,7 +45,7 @@ EOF
         "${output}" == *"--alias qwen"* && \
         "${output}" == *"--jinja"* && \
         "${output}" == *"--reasoning-format deepseek"* && \
-        "${output}" == *"--port 8080"* && \
+        "${output}" == *"--port 8081"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
         "${cpu_moe_ok}" == "1" ]]; then
     echo "PASS: launcher emits the blessed profile"
@@ -79,7 +79,7 @@ test_opencode_config() {
      grep -q '"min_p": 0.0' "${config_path}" && \
      grep -q '"presence_penalty": 0.0' "${config_path}" && \
      grep -q '"repeat_penalty": 1.0' "${config_path}" && \
-     grep -q 'http://127.0.0.1:8080/v1' "${config_path}" && \
+     grep -q 'http://127.0.0.1:8081/v1' "${config_path}" && \
      grep -q '"disabled_providers": \["exa", "openai", "anthropic"' "${config_path}"; then
     echo "PASS: OpenCode config matches the blessed profile"
   else
