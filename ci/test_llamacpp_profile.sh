@@ -44,7 +44,7 @@ EOF
         "${output}" == *"-fa on"* && \
         "${output}" == *"--alias qwen"* && \
         "${output}" == *"--jinja"* && \
-        "${output}" == *"--reasoning on"* && \
+        "${output}" == *"--reasoning-format deepseek"* && \
         "${output}" == *"--port 8080"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
         "${cpu_moe_ok}" == "1" ]]; then

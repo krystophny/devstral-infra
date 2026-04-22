@@ -90,7 +90,7 @@ CMD=(
   --port "${PORT}"
   --alias qwen
   --jinja
-  --reasoning on
+  --reasoning-format deepseek
   -np 1
 )
 if [[ "${CPU_MOE}" == "true" ]]; then
