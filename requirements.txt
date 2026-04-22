@@ -1,5 +1,0 @@
-# vLLM: inference engine for Linux/WSL only
-# macOS: uses Ollama (see scripts/setup_mac.sh)
-# Linux/WSL CUDA: pip install vllm>=0.8.0
-# Linux CPU: pip install vllm>=0.8.0 --extra-index-url pytorch/cpu
-vllm>=0.8.0
