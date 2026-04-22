@@ -62,7 +62,7 @@ resolve_llamacpp_asset() {
 import json, re, sys
 flavor = sys.argv[1]
 data = json.load(sys.stdin)
-pat = re.compile(rf"llama-.*-bin-{re.escape(flavor)}\.zip$")
+pat = re.compile(rf"llama-.*-bin-{re.escape(flavor)}\.(zip|tar\.gz)$")
 for asset in data["assets"]:
     if pat.search(asset["name"]):
         print(data["tag_name"], asset["browser_download_url"])
@@ -92,29 +92,26 @@ sys.exit(1)
 ' "${suffix}"
 }
 
-fetch_zip() {
-  local url="$1" dest="$2"
-  local tmp
-  tmp="$(mktemp -d)"
-  curl -fsSL -o "${tmp}/pkg.zip" "${url}"
-  mkdir -p "${dest}"
-  unzip -q -o "${tmp}/pkg.zip" -d "${tmp}/unpacked"
-  cp -R "${tmp}/unpacked/." "${dest}/"
-  rm -rf "${tmp}"
-}
-
-fetch_tar() {
+fetch_archive() {
   local url="$1" dest="$2"
   local tmp
   tmp="$(mktemp -d)"
   curl -fsSL -o "${tmp}/pkg" "${url}"
-  mkdir -p "${dest}"
+  mkdir -p "${dest}" "${tmp}/unpacked"
   case "${url}" in
-    *.tar.gz|*.tgz) tar -xzf "${tmp}/pkg" -C "${dest}" ;;
-    *.tar.xz)       tar -xJf "${tmp}/pkg" -C "${dest}" ;;
-    *.zip)          unzip -q -o "${tmp}/pkg" -d "${dest}" ;;
+    *.tar.gz|*.tgz) tar -xzf "${tmp}/pkg" -C "${tmp}/unpacked" ;;
+    *.tar.xz)       tar -xJf "${tmp}/pkg" -C "${tmp}/unpacked" ;;
+    *.zip)          unzip -q -o "${tmp}/pkg" -d "${tmp}/unpacked" ;;
     *) die "unknown archive: ${url}" ;;
   esac
+  # Flatten common outer wrapper dirs (e.g. "build/bin" or "llama-<tag>/").
+  local inner
+  inner="$(find "${tmp}/unpacked" -type f \( -name 'llama-server' -o -name 'llama-server.exe' -o -name 'opencode' -o -name 'opencode.exe' \) -print -quit | xargs -I{} dirname {} 2>/dev/null || true)"
+  if [[ -n "${inner}" ]]; then
+    cp -R "${inner}/." "${dest}/"
+  else
+    cp -R "${tmp}/unpacked/." "${dest}/"
+  fi
   rm -rf "${tmp}"
 }
 
@@ -133,13 +130,13 @@ copy_model() {
 build_linux_cuda() {
   local t="${OUT}/linux-cuda"
   mkdir -p "${t}/llama.cpp" "${t}/opencode"
-  read -r tag url <<< "$(resolve_llamacpp_asset "ubuntu-x64-cuda" || die "no ubuntu-x64-cuda asset")"
+  read -r tag url <<< "$(resolve_llamacpp_asset "ubuntu-vulkan-x64" || die "no ubuntu-vulkan-x64 asset")"
   echo "linux-cuda: llama.cpp ${tag}"
-  fetch_zip "${url}" "${t}/llama.cpp"
+  fetch_archive "${url}" "${t}/llama.cpp"
 
-  read -r oc_tag oc_url <<< "$(resolve_opencode_asset "linux-x64.zip" || die "no opencode linux-x64 asset")"
+  read -r oc_tag oc_url <<< "$(resolve_opencode_asset "opencode-linux-x64.tar.gz" || die "no opencode linux-x64 asset")"
   echo "linux-cuda: opencode ${oc_tag}"
-  fetch_zip "${oc_url}" "${t}/opencode"
+  fetch_archive "${oc_url}" "${t}/opencode"
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
 
   cat > "${t}/start.sh" <<'EOF'
@@ -151,7 +148,7 @@ MODEL="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
 exec "${HERE}/llama.cpp/llama-server" \
   -m "${MODEL}" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
   -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe \
-  --alias qwen --jinja --reasoning on \
+  --alias qwen --jinja --reasoning-format deepseek \
   --host 127.0.0.1 --port 8080
 EOF
   chmod +x "${t}/start.sh"
@@ -180,7 +177,7 @@ Description=qwenstack llama.cpp (Qwen3.6 35B A3B Q4)
 After=default.target
 
 [Service]
-ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning on --host 127.0.0.1 --port 8080
+ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
 Restart=on-failure
 RestartSec=5
 
@@ -234,11 +231,11 @@ build_mac_m1() {
   mkdir -p "${t}/llama.cpp" "${t}/opencode"
   read -r tag url <<< "$(resolve_llamacpp_asset "macos-arm64" || die "no macos-arm64 asset")"
   echo "mac-m1: llama.cpp ${tag}"
-  fetch_zip "${url}" "${t}/llama.cpp"
+  fetch_archive "${url}" "${t}/llama.cpp"
 
-  read -r oc_tag oc_url <<< "$(resolve_opencode_asset "darwin-arm64.zip" || die "no opencode darwin-arm64 asset")"
+  read -r oc_tag oc_url <<< "$(resolve_opencode_asset "opencode-darwin-arm64.zip" || die "no opencode darwin-arm64 asset")"
   echo "mac-m1: opencode ${oc_tag}"
-  fetch_zip "${oc_url}" "${t}/opencode"
+  fetch_archive "${oc_url}" "${t}/opencode"
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
 
   cat > "${t}/start.sh" <<'EOF'
@@ -250,7 +247,7 @@ MODEL="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
 exec "${HERE}/llama.cpp/llama-server" \
   -m "${MODEL}" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
   -b 2048 -ub 512 -ngl 99 -fa on \
-  --alias qwen --jinja --reasoning on \
+  --alias qwen --jinja --reasoning-format deepseek \
   --host 127.0.0.1 --port 8080
 EOF
   chmod +x "${t}/start.sh"
@@ -294,7 +291,7 @@ cat > "${PLIST}" <<XML
     <string>-fa</string><string>on</string>
     <string>--alias</string><string>qwen</string>
     <string>--jinja</string>
-    <string>--reasoning</string><string>on</string>
+    <string>--reasoning-format</string><string>deepseek</string>
     <string>--host</string><string>127.0.0.1</string>
     <string>--port</string><string>8080</string>
   </array>
@@ -345,13 +342,13 @@ EOF
 build_windows_arc() {
   local t="${OUT}/windows-arc"
   mkdir -p "${t}/llama.cpp" "${t}/opencode"
-  read -r tag url <<< "$(resolve_llamacpp_asset "win-x64-vulkan" || die "no win-x64-vulkan asset")"
+  read -r tag url <<< "$(resolve_llamacpp_asset "win-vulkan-x64" || die "no win-vulkan-x64 asset")"
   echo "windows-arc: llama.cpp ${tag}"
-  fetch_zip "${url}" "${t}/llama.cpp"
+  fetch_archive "${url}" "${t}/llama.cpp"
 
-  read -r oc_tag oc_url <<< "$(resolve_opencode_asset "windows-x64.zip" || die "no opencode windows-x64 asset")"
+  read -r oc_tag oc_url <<< "$(resolve_opencode_asset "opencode-windows-x64.zip" || die "no opencode windows-x64 asset")"
   echo "windows-arc: opencode ${oc_tag}"
-  fetch_zip "${oc_url}" "${t}/opencode"
+  fetch_archive "${oc_url}" "${t}/opencode"
 
   cat > "${t}/start.bat" <<'EOF'
 @echo off
@@ -366,7 +363,7 @@ if not exist "%MODEL%" (
 "%HERE%llama.cpp\llama-server.exe" ^
   -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 ^
   -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe ^
-  --alias qwen --jinja --reasoning on ^
+  --alias qwen --jinja --reasoning-format deepseek ^
   --host 127.0.0.1 --port 8080
 EOF
 
@@ -394,7 +391,7 @@ if not exist "%MODEL%" (
 )
 
 REM Register a no-admin scheduled task that starts at logon.
-set "RUNCMD=""%DEST%\llama.cpp\llama-server.exe"" -m ""%MODEL%"" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning on --host 127.0.0.1 --port 8080"
+set "RUNCMD=""%DEST%\llama.cpp\llama-server.exe"" -m ""%MODEL%"" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080"
 schtasks /Create /F /SC ONLOGON /TN "qwenstack-llamacpp" /TR "%RUNCMD%" /RL LIMITED
 schtasks /Run /TN "qwenstack-llamacpp"
 

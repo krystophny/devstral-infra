@@ -17,20 +17,21 @@ source "${SCRIPT_DIR}/_common.sh"
 
 have curl || die "curl is required"
 have unzip || die "unzip is required"
+have tar || die "tar is required"
 have python3 || die "python3 is required"
 
 PLATFORM="$(detect_platform)"
 ARCH="$(detect_arch)"
-GPU="$(detect_gpu)"
+# Upstream ggml-org ships Vulkan as the portable non-Mac backend; it runs on
+# NVIDIA, Intel Arc, and AMD with their stock Vulkan drivers. CUDA-specific
+# builds are only provided for Windows.
 FLAVOR="${LLAMACPP_FLAVOR:-}"
 if [[ -z "${FLAVOR}" ]]; then
-  case "${PLATFORM}-${GPU}" in
-    mac-metal)               FLAVOR="macos-arm64" ;;
-    linux-cuda|wsl-cuda)     FLAVOR="ubuntu-${ARCH}-cuda" ;;
-    linux-vulkan|wsl-vulkan) FLAVOR="ubuntu-${ARCH}-vulkan" ;;
-    linux-cpu|wsl-cpu)       FLAVOR="ubuntu-${ARCH}-cpu" ;;
-    windows-*)               FLAVOR="win-${ARCH}-vulkan" ;;
-    *) die "cannot infer llama.cpp release flavor for ${PLATFORM}/${GPU}" ;;
+  case "${PLATFORM}" in
+    mac)           FLAVOR="macos-${ARCH}" ;;
+    linux|wsl)     FLAVOR="ubuntu-vulkan-${ARCH}" ;;
+    windows)       FLAVOR="win-vulkan-${ARCH}" ;;
+    *) die "cannot infer llama.cpp release flavor for ${PLATFORM}" ;;
   esac
 fi
 
@@ -49,7 +50,7 @@ asset_url="$(printf '%s' "${release_json}" | python3 -c '
 import json, re, sys
 flavor = sys.argv[1]
 data = json.load(sys.stdin)
-pat = re.compile(rf"llama-.*-bin-{re.escape(flavor)}\.zip$")
+pat = re.compile(rf"llama-.*-bin-{re.escape(flavor)}\.(zip|tar\.gz)$")
 for asset in data["assets"]:
     if pat.search(asset["name"]):
         print(asset["browser_download_url"])
@@ -66,9 +67,14 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "${tmpdir}"' EXIT
 
 echo "downloading ${asset_url}..."
-curl -fsSL -o "${tmpdir}/llama.zip" "${asset_url}"
+curl -fsSL -o "${tmpdir}/pkg" "${asset_url}"
 echo "unpacking into ${LLAMACPP_HOME}..."
-unzip -q -o "${tmpdir}/llama.zip" -d "${tmpdir}/unpacked"
+mkdir -p "${tmpdir}/unpacked"
+case "${asset_name}" in
+  *.zip)    unzip -q -o "${tmpdir}/pkg" -d "${tmpdir}/unpacked" ;;
+  *.tar.gz) tar -xzf "${tmpdir}/pkg" -C "${tmpdir}/unpacked" ;;
+  *) die "unknown archive format: ${asset_name}" ;;
+esac
 
 binary_dir="$(find "${tmpdir}/unpacked" -type f \( -name 'llama-server' -o -name 'llama-server.exe' \) -print -quit | xargs -I{} dirname {})"
 [[ -n "${binary_dir}" ]] || die "llama-server not found in downloaded archive"
