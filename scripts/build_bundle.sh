@@ -369,20 +369,27 @@ EOF
 
   cat > "${t}/install.bat" <<'EOF'
 @echo off
-REM Install qwenstack into %USERPROFILE%\qwenstack and register a login task.
-setlocal
+REM Install qwenstack into %USERPROFILE%\qwenstack and register a Startup
+REM shortcut so the server launches at every logon. No admin, no UAC:
+REM the Startup folder and %USERPROFILE% are always user-writable.
+setlocal EnableDelayedExpansion
 set HERE=%~dp0
 set BUNDLE_ROOT=%HERE%..
 set DEST=%USERPROFILE%\qwenstack
+set STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
+set OC_CFG_DIR=%USERPROFILE%\.config\opencode
+set OC_CFG=%OC_CFG_DIR%\opencode.json
 
+echo [1/5] creating %DEST%
 if not exist "%DEST%" mkdir "%DEST%"
 if not exist "%DEST%\llama.cpp" mkdir "%DEST%\llama.cpp"
 if not exist "%DEST%\opencode" mkdir "%DEST%\opencode"
 if not exist "%DEST%\models" mkdir "%DEST%\models"
 
-xcopy /E /Y /I "%HERE%llama.cpp\*" "%DEST%\llama.cpp\"
-xcopy /E /Y /I "%HERE%opencode\*" "%DEST%\opencode\"
-xcopy /Y /I "%BUNDLE_ROOT%\models\*.gguf" "%DEST%\models\"
+echo [2/5] copying binaries and model (this takes a while for the GGUF)...
+xcopy /E /Y /I /Q "%HERE%llama.cpp\*" "%DEST%\llama.cpp\" >nul
+xcopy /E /Y /I /Q "%HERE%opencode\*" "%DEST%\opencode\" >nul
+xcopy /Y /I /Q "%BUNDLE_ROOT%\models\*.gguf" "%DEST%\models\" >nul
 
 set MODEL=%DEST%\models\Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
 if not exist "%MODEL%" (
@@ -390,43 +397,51 @@ if not exist "%MODEL%" (
   exit /b 1
 )
 
-REM Register a no-admin scheduled task that starts at logon.
-set "RUNCMD=""%DEST%\llama.cpp\llama-server.exe"" -m ""%MODEL%"" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080"
-schtasks /Create /F /SC ONLOGON /TN "qwenstack-llamacpp" /TR "%RUNCMD%" /RL LIMITED
-schtasks /Run /TN "qwenstack-llamacpp"
+echo [3/5] writing %DEST%\run-llamacpp.bat
+> "%DEST%\run-llamacpp.bat" echo @echo off
+>> "%DEST%\run-llamacpp.bat" echo start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
 
-if not exist "%USERPROFILE%\.config\opencode" mkdir "%USERPROFILE%\.config\opencode"
-> "%USERPROFILE%\.config\opencode\opencode.json" (
-  echo {
-  echo   "$schema": "https://opencode.ai/config.json",
-  echo   "model": "llamacpp/qwen3.6-35b-a3b-q4",
-  echo   "small_model": "llamacpp/qwen3.6-35b-a3b-q4",
-  echo   "agent": { "title": { "disable": true } },
-  echo   "share": "disabled",
-  echo   "autoupdate": false,
-  echo   "permission": "allow",
-  echo   "experimental": { "openTelemetry": false },
-  echo   "disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
-  echo   "provider": {
-  echo     "llamacpp": {
-  echo       "npm": "@ai-sdk/openai-compatible",
-  echo       "name": "llama.cpp (Local)",
-  echo       "options": { "baseURL": "http://127.0.0.1:8080/v1" },
-  echo       "models": {
-  echo         "qwen3.6-35b-a3b-q4": {
-  echo           "name": "Qwen3.6 35B A3B Q4 (Local)",
-  echo           "limit": { "context": 131072, "output": 16384 },
-  echo           "reasoning": true,
-  echo           "tool_call": true,
-  echo           "options": { "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096 }
-  echo         }
-  echo       }
-  echo     }
-  echo   }
-  echo }
-)
+echo [4/5] installing Startup shortcut at "%STARTUP%\qwenstack-llamacpp.bat"
+if not exist "%STARTUP%" mkdir "%STARTUP%"
+copy /Y "%DEST%\run-llamacpp.bat" "%STARTUP%\qwenstack-llamacpp.bat" >nul
 
-echo OK. Run: %DEST%\opencode\opencode.exe
+echo [5/5] writing OpenCode config to %OC_CFG%
+if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
+>  "%OC_CFG%" echo {
+>> "%OC_CFG%" echo   "$schema": "https://opencode.ai/config.json",
+>> "%OC_CFG%" echo   "model": "llamacpp/qwen3.6-35b-a3b-q4",
+>> "%OC_CFG%" echo   "small_model": "llamacpp/qwen3.6-35b-a3b-q4",
+>> "%OC_CFG%" echo   "agent": { "title": { "disable": true } },
+>> "%OC_CFG%" echo   "share": "disabled",
+>> "%OC_CFG%" echo   "autoupdate": false,
+>> "%OC_CFG%" echo   "permission": "allow",
+>> "%OC_CFG%" echo   "experimental": { "openTelemetry": false },
+>> "%OC_CFG%" echo   "disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
+>> "%OC_CFG%" echo   "provider": {
+>> "%OC_CFG%" echo     "llamacpp": {
+>> "%OC_CFG%" echo       "npm": "@ai-sdk/openai-compatible",
+>> "%OC_CFG%" echo       "name": "llama.cpp (Local)",
+>> "%OC_CFG%" echo       "options": { "baseURL": "http://127.0.0.1:8080/v1" },
+>> "%OC_CFG%" echo       "models": {
+>> "%OC_CFG%" echo         "qwen3.6-35b-a3b-q4": {
+>> "%OC_CFG%" echo           "name": "Qwen3.6 35B A3B Q4 (Local)",
+>> "%OC_CFG%" echo           "limit": { "context": 131072, "output": 16384 },
+>> "%OC_CFG%" echo           "reasoning": true,
+>> "%OC_CFG%" echo           "tool_call": true,
+>> "%OC_CFG%" echo           "options": { "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096 }
+>> "%OC_CFG%" echo         }
+>> "%OC_CFG%" echo       }
+>> "%OC_CFG%" echo     }
+>> "%OC_CFG%" echo   }
+>> "%OC_CFG%" echo }
+
+echo.
+echo Starting the server now (will also auto-start at every logon)...
+start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
+
+echo.
+echo OK. Wait ~30s for the model to load, then run: %DEST%\opencode\opencode.exe
+echo (to stop the server: open Task Manager and end llama-server.exe)
 EOF
 }
 
