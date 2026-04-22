@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start llama-server on port 8080 with the blessed Qwen3.6 35B A3B Q4_K_M profile:
+# Start llama-server on port 8081 with the blessed Qwen3.6 35B A3B Q4_K_M profile:
 #   - 128K context (131072), Q8_0 KV cache, flash attention
 #   - CPU-MoE on for Linux/Windows (MoE experts on CPU, attention on GPU)
 #   - Single bound alias "qwen", Jinja templating, reasoning enabled
@@ -10,7 +10,7 @@
 #   LLAMACPP_MODEL      explicit GGUF path (else resolved via llamacpp_models.py)
 #   LLAMACPP_MODEL_ALIAS alias to resolve from the model registry (default: blessed)
 #   LLAMACPP_CONTEXT    context size (default 131072)
-#   LLAMACPP_PORT       listen port (default 8080)
+#   LLAMACPP_PORT       listen port (default 8081; bundles default to 8080)
 #   LLAMACPP_HOST       bind host (default 127.0.0.1)
 #   LLAMACPP_CPU_MOE    force on/off (default: on for non-Mac)
 #   LLAMACPP_DRY_RUN    true to print the command and exit
@@ -56,7 +56,7 @@ fi
 
 # --- Runtime parameters ---
 HOST="${LLAMACPP_HOST:-127.0.0.1}"
-PORT="${LLAMACPP_PORT:-8080}"
+PORT="${LLAMACPP_PORT:-8081}"
 CONTEXT="${LLAMACPP_CONTEXT:-131072}"
 BATCH="${LLAMACPP_BATCH:-2048}"
 UBATCH="${LLAMACPP_UBATCH:-512}"

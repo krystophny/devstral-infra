@@ -10,7 +10,9 @@ One blessed local coding stack, nothing else:
 - **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M`, alias `qwen3.6-35b-a3b-q4`.
 - **Harness**: `opencode` CLI, title generation disabled, reasoning on.
 
-All three target OSes run the same server on `127.0.0.1:8080`:
+Bundle targets run the server on `127.0.0.1:8080`; the local development
+box (this repo's scripts) uses `127.0.0.1:8081` because another service
+holds 8080 here.
 
 | OS      | Backend | CPU-MoE | User service          |
 | ------- | ------- | ------- | --------------------- |
@@ -28,7 +30,7 @@ scripts/
   _common.sh                    shared bash helpers (paths, platform detect, stop_pid)
   setup_llamacpp.sh             fetch latest upstream release, unpack to ~/.local/llama.cpp
   llamacpp_models.py            one default model + optional aliases; prefetch/resolve
-  server_start_llamacpp.sh      single-instance launcher (port 8080, Q8 KV, 128K ctx)
+  server_start_llamacpp.sh      single-instance launcher (port 8081 locally; 8080 in bundles)
   server_stop_llamacpp.sh
   opencode_install.sh           curl|bash (online) or OPENCODE_OFFLINE_ARCHIVE (USB)
   opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json

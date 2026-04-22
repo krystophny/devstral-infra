@@ -2,7 +2,7 @@
 # Configure OpenCode for the local llama.cpp server.
 #
 # Single blessed profile: Qwen3.6 35B A3B Q4_K_M over the local
-# llama-server on http://127.0.0.1:8080/v1, with title generation
+# llama-server on http://127.0.0.1:8081/v1, with title generation
 # disabled for latency and all non-local providers off.
 set -euo pipefail
 
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 
 HOST="${LLAMACPP_HOST:-127.0.0.1}"
-PORT="${LLAMACPP_PORT:-8080}"
+PORT="${LLAMACPP_PORT:-8081}"
 API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
 MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen3.6-35b-a3b-q4}"
