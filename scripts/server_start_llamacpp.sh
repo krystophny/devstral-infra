@@ -1,739 +1,152 @@
 #!/usr/bin/env bash
-# Start llama.cpp server with the validated local Qwen/OpenCode profile.
-# Usage: server_start_llamacpp.sh [instance]
-#   instance: "local" (default, port 8080, thinking on) or "fast" (port 8081, thinking on)
-#   Also settable via LLAMACPP_INSTANCE env var.
+# Start llama-server on port 8080 with the blessed Qwen3.6 35B A3B Q4_K_M profile:
+#   - 128K context (131072), Q8_0 KV cache, flash attention
+#   - CPU-MoE on for Linux/Windows (MoE experts on CPU, attention on GPU)
+#   - Single bound alias "qwen", Jinja templating, reasoning enabled
+#
+# Env overrides:
+#   LLAMACPP_HOME       install dir (default ~/.local/llama.cpp)
+#   LLAMACPP_SERVER_BIN explicit llama-server binary
+#   LLAMACPP_MODEL      explicit GGUF path (else resolved via llamacpp_models.py)
+#   LLAMACPP_MODEL_ALIAS alias to resolve from the model registry (default: blessed)
+#   LLAMACPP_CONTEXT    context size (default 131072)
+#   LLAMACPP_PORT       listen port (default 8080)
+#   LLAMACPP_HOST       bind host (default 127.0.0.1)
+#   LLAMACPP_CPU_MOE    force on/off (default: on for non-Mac)
+#   LLAMACPP_DRY_RUN    true to print the command and exit
+#   LLAMACPP_SMOKE_TEST false to skip the post-start /v1/chat/completions probe
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
-migrate_legacy_pid
-
-# --- Instance resolution ---
-INSTANCE="${1:-${LLAMACPP_INSTANCE:-local}}"
-if [[ "${INSTANCE}" != "local" && "${INSTANCE}" != "fast" ]]; then
-  die "unknown instance: ${INSTANCE} (expected: local, fast)"
-fi
-
-# Migrate old unsuffixed pid/port/log files to the "local" instance
-for ext in pid port log; do
-  old="${RUN_DIR}/llamacpp.${ext}"
-  new="${RUN_DIR}/llamacpp-local.${ext}"
-  if [[ -f "${old}" && ! -f "${new}" ]]; then
-    mv "${old}" "${new}"
-  fi
-  rm -f "${old}"
-done
-
-# Helper: resolve an instance-specific env var with fallback to the generic one.
-# Usage: instance_var VARNAME DEFAULT
-#   Checks LLAMACPP_{UPPER_INSTANCE}_{VARNAME}, then LLAMACPP_{VARNAME}, then DEFAULT.
-instance_var() {
-  local varname="$1" default="$2"
-  local upper_instance
-  upper_instance="$(printf '%s' "${INSTANCE}" | tr '[:lower:]' '[:upper:]')"
-  local specific="LLAMACPP_${upper_instance}_${varname}"
-  local generic="LLAMACPP_${varname}"
-  if [[ -n "${!specific:-}" ]]; then
-    printf '%s' "${!specific}"
-  elif [[ -n "${!generic:-}" ]]; then
-    printf '%s' "${!generic}"
-  else
-    printf '%s' "${default}"
-  fi
-}
-
-# --- Instance defaults ---
-case "${INSTANCE}" in
-  local)
-    DEFAULT_PORT="8080"
-    DEFAULT_MODEL_ALIAS="qwen3.5-35b-a3b"
-    DEFAULT_CONTEXT="131072"
-    DEFAULT_THINKING="true"
-    ;;
-  fast)
-    DEFAULT_PORT="8081"
-    DEFAULT_MODEL_ALIAS="qwen3.6-35b-a3b-q4"
-    DEFAULT_CONTEXT="131072"
-    DEFAULT_THINKING="true"
-    ;;
-esac
-
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  SIBLING_LLAMA_SERVER="/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
-else
-  SIBLING_LLAMA_SERVER="${HOME}/code/llama.cpp-dev/llama.cpp/build/bin/llama-server"
-fi
-LLAMACPP_DIR="${HOME}/.local/llama.cpp"
-SYSTEM_LLAMA_SERVER="$(command -v llama-server 2>/dev/null || true)"
-if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
-  LLAMA_SERVER="${LLAMACPP_SERVER_BIN}"
-elif [[ -x "${SIBLING_LLAMA_SERVER}" ]]; then
-  LLAMA_SERVER="${SIBLING_LLAMA_SERVER}"
-elif [[ -n "${SYSTEM_LLAMA_SERVER}" ]]; then
-  LLAMA_SERVER="${SYSTEM_LLAMA_SERVER}"
-else
-  LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"
-fi
-LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER}")" && pwd)"
+PLATFORM="$(detect_platform)"
 MODELS_SCRIPT="${SCRIPT_DIR}/llamacpp_models.py"
 
-# Check if llama.cpp is installed
-if [[ ! -x "${LLAMA_SERVER}" ]]; then
-  die "llama.cpp not installed. Run: scripts/setup_llamacpp.sh"
+# --- Binary resolution ---
+SERVER_EXE="llama-server"
+[[ "${PLATFORM}" == "windows" ]] && SERVER_EXE="llama-server.exe"
+if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
+  LLAMA_SERVER="${LLAMACPP_SERVER_BIN}"
+elif [[ -x "${LLAMACPP_HOME}/${SERVER_EXE}" ]]; then
+  LLAMA_SERVER="${LLAMACPP_HOME}/${SERVER_EXE}"
+elif have "${SERVER_EXE}"; then
+  LLAMA_SERVER="$(command -v "${SERVER_EXE}")"
+else
+  die "llama-server not installed. Run: scripts/setup_llamacpp.sh"
 fi
+[[ -x "${LLAMA_SERVER}" ]] || die "not executable: ${LLAMA_SERVER}"
 
+LLAMA_SERVER_DIR="$(cd "$(dirname "${LLAMA_SERVER}")" && pwd)"
+export LD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 export DYLD_LIBRARY_PATH="${LLAMA_SERVER_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
 
-HOST="${DEVSTRAL_HOST:-0.0.0.0}"
-PORT="${DEVSTRAL_PORT:-${DEFAULT_PORT}}"
-PROBE_HOST="${LLAMACPP_PROBE_HOST:-${HOST}}"
-if [[ "${PROBE_HOST}" == "0.0.0.0" ]]; then
-  PROBE_HOST="127.0.0.1"
-fi
-
-PID_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.pid"
-LOG_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.log"
-PORT_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.port"
-START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
-LAUNCHER="${LLAMACPP_LAUNCHER:-auto}"
-
-# Model configuration.
-usable_mb="$(detect_vram_mb)"
+# --- Model resolution ---
+DEFAULT_ALIAS="$(python3 "${MODELS_SCRIPT}" default-alias)"
+MODEL_ALIAS="${LLAMACPP_MODEL_ALIAS:-${DEFAULT_ALIAS}}"
 MODEL_PATH="${LLAMACPP_MODEL:-}"
-HF_MODEL=""
-MODEL_ALIAS="$(instance_var MODEL_ALIAS "${DEFAULT_MODEL_ALIAS}")"
 if [[ -z "${MODEL_PATH}" ]]; then
-  if [[ -n "${LLAMACPP_HF_MODEL:-}" ]]; then
-    HF_MODEL="${LLAMACPP_HF_MODEL}"
-  else
-    if [[ -x "${MODELS_SCRIPT}" || -f "${MODELS_SCRIPT}" ]]; then
-      resolved_path="$(python3 "${MODELS_SCRIPT}" resolve "${MODEL_ALIAS}" 2>/dev/null || true)"
-      if [[ -n "${resolved_path}" && -f "${resolved_path}" ]]; then
-        MODEL_PATH="${resolved_path}"
-      fi
-    fi
-    if [[ -z "${MODEL_PATH}" ]]; then
-      case "${MODEL_ALIAS}" in
-        qwen3.5-0.8b) HF_MODEL="lmstudio-community/Qwen3.5-0.8B-GGUF:Q8_0" ;;
-        qwen3.5-2b) HF_MODEL="lmstudio-community/Qwen3.5-2B-GGUF:Q8_0" ;;
-        qwen3.5-4b) HF_MODEL="lmstudio-community/Qwen3.5-4B-GGUF:Q8_0" ;;
-        qwen3.5-9b)
-          if [[ "${usable_mb}" -le 16384 ]]; then
-            HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q4_K_M"
-          else
-            HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q8_0"
-          fi
-          ;;
-        qwen3.5-9b-q4) HF_MODEL="lmstudio-community/Qwen3.5-9B-GGUF:Q4_K_M" ;;
-        qwen3.5-27b) HF_MODEL="lmstudio-community/Qwen3.5-27B-GGUF:Q8_0" ;;
-        qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
-        qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
-        qwen3.6-35b-a3b) HF_MODEL="unsloth/Qwen3.6-35B-A3B-GGUF:Q8_0" ;;
-        qwen3.6-35b-a3b-q4) HF_MODEL="bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q4_K_M" ;;
-        minimax-m2.5-q4) HF_MODEL="AesSedai/MiniMax-M2.5-GGUF:Q4_K_M" ;;
-        gemma-4-31b-it) HF_MODEL="ggml-org/gemma-4-31B-it-GGUF:Q8_0" ;;
-        gemma-4-26b-a4b-it) HF_MODEL="ggml-org/gemma-4-26B-A4B-it-GGUF:Q8_0" ;;
-        gpt-oss-20b) HF_MODEL="ggml-org/gpt-oss-20b-GGUF" ;;
-        gpt-oss-120b) HF_MODEL="ggml-org/gpt-oss-120b-GGUF" ;;
-        nemotron-120b-a12b) HF_MODEL="lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF:Q8_0" ;;
-        qwen3-coder-next) HF_MODEL="lmstudio-community/Qwen3-Coder-Next-GGUF:Q8_0" ;;
-        qwen3-coder-30b-a3b) HF_MODEL="lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q8_0" ;;
-        devstral-small-2-24b) HF_MODEL="lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF:Q8_0" ;;
-        devstral-2-123b) HF_MODEL="lmstudio-community/Devstral-2-123B-Instruct-2512-GGUF:Q8_0" ;;
-        *)
-          if [[ "${usable_mb}" -ge 180000 ]]; then
-            HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0"
-          else
-            HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0"
-          fi
-          ;;
-      esac
-    fi
+  if resolved="$(python3 "${MODELS_SCRIPT}" resolve "${MODEL_ALIAS}" 2>/dev/null)" && [[ -n "${resolved}" && -f "${resolved}" ]]; then
+    MODEL_PATH="${resolved}"
   fi
 fi
+[[ -n "${MODEL_PATH}" ]] || die "model not found. Run: scripts/llamacpp_models.py prefetch"
+[[ -f "${MODEL_PATH}" || "${LLAMACPP_DRY_RUN:-false}" == "true" ]] || die "model file missing: ${MODEL_PATH}"
 
-# Context and throughput configuration
-CONTEXT_SIZE="$(instance_var CONTEXT "${DEFAULT_CONTEXT}")"
-CTX_CHECKPOINTS="${LLAMACPP_CTX_CHECKPOINTS:-64}"
-CHECKPOINT_EVERY_N_TOKENS="${LLAMACPP_CHECKPOINT_EVERY_N_TOKENS:-4096}"
-BATCH_SIZE="${LLAMACPP_BATCH:-2048}"
-UBATCH_SIZE="${LLAMACPP_UBATCH:-512}"
-if command -v nproc >/dev/null 2>&1; then
-  cpu_count="$(nproc)"
-else
-  cpu_count="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
-fi
-CPU_THREADS="${LLAMACPP_THREADS:-${cpu_count}}"
-ENABLE_THINKING="${LLAMACPP_ENABLE_THINKING:-${DEFAULT_THINKING}}"
-SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
-SMOKE_TEST_PROMPT="${LLAMACPP_SMOKE_TEST_PROMPT:-Reply with exactly READY.}"
-DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
-PRINT_EXEC_START="${LLAMACPP_PRINT_EXEC_START:-false}"
-HTTP_TRACE_DIR="${LLAMACPP_HTTP_TRACE_DIR:-}"
-HTTP_TRACE_MAX_BYTES="${LLAMACPP_HTTP_TRACE_MAX_BYTES:-}"
-EFFECTIVE_EXTRA_FLAGS="${LLAMACPP_EXTRA_FLAGS:-}"
+# --- Runtime parameters ---
+HOST="${LLAMACPP_HOST:-127.0.0.1}"
+PORT="${LLAMACPP_PORT:-8080}"
+CONTEXT="${LLAMACPP_CONTEXT:-131072}"
+BATCH="${LLAMACPP_BATCH:-2048}"
+UBATCH="${LLAMACPP_UBATCH:-512}"
+NGL="${LLAMACPP_NGL:-99}"
 
-if [[ " ${EFFECTIVE_EXTRA_FLAGS} " != *" -ctk "* && " ${EFFECTIVE_EXTRA_FLAGS} " != *" --cache-type-k "* ]]; then
-  EFFECTIVE_EXTRA_FLAGS="${EFFECTIVE_EXTRA_FLAGS:+${EFFECTIVE_EXTRA_FLAGS} }-ctk q8_0"
-fi
-if [[ " ${EFFECTIVE_EXTRA_FLAGS} " != *" -ctv "* && " ${EFFECTIVE_EXTRA_FLAGS} " != *" --cache-type-v "* ]]; then
-  EFFECTIVE_EXTRA_FLAGS="${EFFECTIVE_EXTRA_FLAGS:+${EFFECTIVE_EXTRA_FLAGS} }-ctv q8_0"
-fi
-
-SAMPLER_TEMP=""
-SAMPLER_TOP_P=""
-SAMPLER_TOP_K=""
-SAMPLER_MIN_P=""
-SAMPLER_PRESENCE_PENALTY=""
-SAMPLER_REPEAT_PENALTY=""
-SAMPLER_REASONING_FORMAT=""
-SAMPLER_REASONING_MODE=""
-SAMPLER_NO_CONTEXT_SHIFT="false"
-CHAT_TEMPLATE_FILE=""
-
-case "${MODEL_ALIAS}" in
-  qwen3.5-*|qwen3.6-*|qwen3-coder-*)
-    # Official Qwen coding/llama.cpp preset.
-    SAMPLER_TEMP="0.6"
-    SAMPLER_TOP_P="0.95"
-    SAMPLER_TOP_K="20"
-    SAMPLER_MIN_P="0"
-    SAMPLER_PRESENCE_PENALTY="0.0"
-    SAMPLER_REPEAT_PENALTY="1.0"
-    SAMPLER_REASONING_FORMAT="deepseek"
-    SAMPLER_NO_CONTEXT_SHIFT="true"
-    ;;
-  gemma-4-*)
-    # Official Gemma 4 best-practice sampling configuration.
-    # Use interleaved template for agentic flow (preserves reasoning before tool calls).
-    # Set min-p 0.0 to override llama.cpp default of 0.05.
-    SAMPLER_TEMP="1.0"
-    SAMPLER_TOP_P="0.95"
-    SAMPLER_TOP_K="64"
-    SAMPLER_MIN_P="0.0"
-    SAMPLER_REASONING_MODE="on"
-    _llama_src="$(cd "$(dirname "${LLAMA_SERVER}")/../.." && pwd)"
-    _tpl="${_llama_src}/models/templates/google-gemma-4-31B-it-interleaved.jinja"
-    if [[ -f "${_tpl}" ]]; then
-      CHAT_TEMPLATE_FILE="${_tpl}"
-    fi
-    ;;
-  minimax-*)
-    # Official MiniMax-M2.5 inference parameters.
-    SAMPLER_TEMP="1.0"
-    SAMPLER_TOP_P="0.95"
-    SAMPLER_TOP_K="40"
-    ;;
-  devstral-small-2-24b|devstral-2-123b)
-    # Mistral's Devstral examples and generation config use low-temperature agentic serving.
-    SAMPLER_TEMP="0.15"
-    ;;
-  nemotron-120b-a12b)
-    # Official Nemotron generation config.
-    SAMPLER_TEMP="1.0"
-    SAMPLER_TOP_P="0.95"
-    ;;
-  gpt-oss-20b|gpt-oss-120b)
-    # Keep OpenAI GPT-OSS on model defaults unless an explicit official sampler preset is published.
-    ;;
-esac
-
-# Check if already running
-if [[ "${DRY_RUN}" != "true" && "${PRINT_EXEC_START}" != "true" && -f "${PID_FILE}" ]]; then
-  pid="$(cat "${PID_FILE}")"
-  if kill -0 "${pid}" >/dev/null 2>&1; then
-    echo "already running (pid ${pid})"
-    exit 0
-  fi
-  rm -f "${PID_FILE}"
-fi
-# Safety: ensure the managed port is free before starting.
-if [[ "${DRY_RUN}" != "true" && "${PRINT_EXEC_START}" != "true" ]]; then
-  port_pids="$(port_listener_pids "${PORT}")"
-  if [[ -n "${port_pids}" ]]; then
-    echo "WARNING: port ${PORT} is already occupied; stopping existing llama.cpp listener(s)..."
-    stop_llamacpp_port_occupants "${PORT}" "pre-start llama.cpp [${INSTANCE}]"
-    sleep 2
-  fi
-fi
-# Use reasonable number of threads
-CPU_THREADS=$(( CPU_THREADS > 24 ? 24 : CPU_THREADS ))
-
-supports_checkpoint_interval="false"
-supports_reasoning_toggle="false"
-if [[ "${DRY_RUN}" == "true" ]]; then
-  supports_checkpoint_interval="true"
-  supports_reasoning_toggle="true"
-else
-  help_output="$("${LLAMA_SERVER}" --help 2>&1 || true)"
-  if [[ "${help_output}" == *"--checkpoint-every-n-tokens"* ]]; then
-    supports_checkpoint_interval="true"
-  fi
-  if [[ "${help_output}" == *"--reasoning [on|off|auto]"* ]]; then
-    supports_reasoning_toggle="true"
-  fi
-fi
-
-# Tensor offload rule. Explicit -ot override takes precedence when set.
-MOE_OFFLOAD="${LLAMACPP_MOE_OFFLOAD:-}"
-
-# CPU-MoE: keep MoE expert FFNs on CPU while attention + shared weights stay on GPU.
-# Default to on for MoE aliases on non-Mac so large MoE models fit in limited VRAM.
-# Apple Silicon's unified memory keeps this off for max speed.
 CPU_MOE_DEFAULT="false"
-case "${MODEL_ALIAS}" in
-  *-a3b*|*-a4b*|*-a10b*|*-a12b*)
-    if [[ "$(detect_platform)" != "mac" ]]; then
-      CPU_MOE_DEFAULT="true"
-    fi
-    ;;
-esac
+[[ "${PLATFORM}" != "mac" ]] && CPU_MOE_DEFAULT="true"
 CPU_MOE="${LLAMACPP_CPU_MOE:-${CPU_MOE_DEFAULT}}"
 
-if [[ "${PRINT_EXEC_START}" != "true" ]]; then
-  echo "Starting llama.cpp server (instance: ${INSTANCE})..."
-  echo "- Binary: ${LLAMA_SERVER}"
-  version_output="$("${LLAMA_SERVER}" --version 2>&1 || true)"
-  if [[ -n "${version_output}" ]]; then
-    while IFS= read -r line; do
-      echo "- ${line}"
-    done <<< "$(printf '%s\n' "${version_output}" | awk '/^version: / || /^built with /')"
-  fi
-  if [[ -n "${MODEL_PATH}" ]]; then
-    echo "- Model: ${MODEL_PATH}"
-  else
-    echo "- Model: ${HF_MODEL} (HuggingFace, will download if needed)"
-  fi
-  echo "- Model alias: ${MODEL_ALIAS}"
-  echo "- Context: ${CONTEXT_SIZE} tokens"
-  echo "- Context checkpoints: ${CTX_CHECKPOINTS}"
-  if [[ "${supports_checkpoint_interval}" == "true" ]]; then
-    echo "- Checkpoint interval: ${CHECKPOINT_EVERY_N_TOKENS} tokens"
-  else
-    echo "- Checkpoint interval: runtime default (installed llama.cpp build does not support explicit tuning)"
-  fi
-  echo "- Batch: ${BATCH_SIZE}"
-  echo "- Ubatch: ${UBATCH_SIZE}"
-  echo "- CPU threads: ${CPU_THREADS}"
-  echo "- Thinking: ${ENABLE_THINKING}"
-  if [[ -n "${SAMPLER_TEMP}" ]]; then echo "- Temperature: ${SAMPLER_TEMP}"; fi
-  if [[ -n "${SAMPLER_TOP_P}" ]]; then echo "- Top-p: ${SAMPLER_TOP_P}"; fi
-  if [[ -n "${SAMPLER_TOP_K}" ]]; then echo "- Top-k: ${SAMPLER_TOP_K}"; fi
-  if [[ -n "${SAMPLER_MIN_P}" ]]; then echo "- Min-p: ${SAMPLER_MIN_P}"; fi
-  if [[ -n "${SAMPLER_PRESENCE_PENALTY}" ]]; then echo "- Presence penalty: ${SAMPLER_PRESENCE_PENALTY}"; fi
-  if [[ -n "${SAMPLER_REPEAT_PENALTY}" ]]; then echo "- Repeat penalty: ${SAMPLER_REPEAT_PENALTY}"; fi
-  if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then echo "- Reasoning format: ${SAMPLER_REASONING_FORMAT}"; fi
-  if [[ -n "${SAMPLER_REASONING_MODE}" ]]; then echo "- Reasoning mode: ${SAMPLER_REASONING_MODE}"; fi
-  if [[ "${SAMPLER_NO_CONTEXT_SHIFT}" == "true" ]]; then echo "- Context shift: disabled"; fi
-  if [[ -n "${CHAT_TEMPLATE_FILE}" ]]; then echo "- Chat template: ${CHAT_TEMPLATE_FILE}"; fi
-  echo "- Smoke test: ${SMOKE_TEST}"
-  if [[ -n "${HTTP_TRACE_DIR}" ]]; then
-    echo "- HTTP trace dir: ${HTTP_TRACE_DIR}"
-  fi
-  if [[ -n "${EFFECTIVE_EXTRA_FLAGS}" ]]; then
-    echo "- Extra flags: ${EFFECTIVE_EXTRA_FLAGS}"
-  fi
-  if [[ -n "${MOE_OFFLOAD}" ]]; then
-    echo "- tensor offload rule: ${MOE_OFFLOAD}"
-  fi
-  if [[ "${CPU_MOE}" == "true" ]]; then
-    echo "- CPU-MoE: on (experts on CPU, attention on GPU)"
-  fi
-fi
+PID_FILE="${RUN_DIR}/llamacpp.pid"
+PORT_FILE="${RUN_DIR}/llamacpp.port"
+LOG_FILE="${LOG_DIR}/llamacpp.log"
 
-# Build command
+DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
+SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
+START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
+
+stop_llamacpp_port_occupants "${PORT}" "llama.cpp server"
+
 CMD=(
   "${LLAMA_SERVER}"
-)
-
-if [[ -n "${MODEL_PATH}" ]]; then
-  CMD+=(-m "${MODEL_PATH}")
-else
-  CMD+=(-hf "${HF_MODEL}")
-fi
-
-CMD+=(
-  -c "${CONTEXT_SIZE}"
-  --ctx-checkpoints "${CTX_CHECKPOINTS}"
-  -b "${BATCH_SIZE}"
-  -ub "${UBATCH_SIZE}"
-  -ngl 99                    # Offload all possible layers to GPU
-  -fa on                     # Flash attention
-  -np 1                      # Single prediction slot for stable agent behavior
-  -t "${CPU_THREADS}"        # CPU threads
+  -m "${MODEL_PATH}"
+  -c "${CONTEXT}"
+  -b "${BATCH}"
+  -ub "${UBATCH}"
+  -ngl "${NGL}"
+  -fa on
+  --cache-type-k q8_0
+  --cache-type-v q8_0
   --host "${HOST}"
   --port "${PORT}"
-  --alias qwen               # Stable model name for API clients
-  --jinja                    # Enable Jinja templating
+  --alias qwen
+  --jinja
+  --reasoning on
+  -np 1
 )
-
-if [[ -n "${CHAT_TEMPLATE_FILE}" ]]; then
-  CMD+=(--chat-template-file "${CHAT_TEMPLATE_FILE}")
-fi
-
-if [[ -n "${SAMPLER_TEMP}" ]]; then
-  CMD+=(--temp "${SAMPLER_TEMP}")
-fi
-
-if [[ -n "${SAMPLER_TOP_P}" ]]; then
-  CMD+=(--top-p "${SAMPLER_TOP_P}")
-fi
-
-if [[ -n "${SAMPLER_TOP_K}" ]]; then
-  CMD+=(--top-k "${SAMPLER_TOP_K}")
-fi
-
-if [[ -n "${SAMPLER_MIN_P}" ]]; then
-  CMD+=(--min-p "${SAMPLER_MIN_P}")
-fi
-
-if [[ -n "${SAMPLER_PRESENCE_PENALTY}" ]]; then
-  CMD+=(--presence-penalty "${SAMPLER_PRESENCE_PENALTY}")
-fi
-
-if [[ -n "${SAMPLER_REPEAT_PENALTY}" ]]; then
-  CMD+=(--repeat-penalty "${SAMPLER_REPEAT_PENALTY}")
-fi
-
-if [[ -n "${SAMPLER_REASONING_FORMAT}" ]]; then
-  CMD+=(--reasoning-format "${SAMPLER_REASONING_FORMAT}")
-fi
-
-if [[ -n "${SAMPLER_REASONING_MODE}" && "${supports_reasoning_toggle}" == "true" && "${ENABLE_THINKING}" != "true" ]]; then
-  CMD+=(--reasoning "${SAMPLER_REASONING_MODE}")
-fi
-
-if [[ "${SAMPLER_NO_CONTEXT_SHIFT}" == "true" ]]; then
-  CMD+=(--no-context-shift)
-fi
-
-if [[ -n "${MOE_OFFLOAD}" ]]; then
-  CMD+=(-ot "${MOE_OFFLOAD}")
-fi
-
 if [[ "${CPU_MOE}" == "true" ]]; then
   CMD+=(--cpu-moe)
 fi
 
-if [[ "${ENABLE_THINKING}" == "true" ]]; then
-  if [[ "${supports_reasoning_toggle}" == "true" ]]; then
-    CMD+=(--reasoning on)
-  else
-    CMD+=(--chat-template-kwargs '{"enable_thinking": true}')
-  fi
-else
-  if [[ "${supports_reasoning_toggle}" == "true" ]]; then
-    CMD+=(--reasoning off)
-  else
-    CMD+=(--chat-template-kwargs '{"enable_thinking": false}')
-  fi
-fi
-
-if [[ "${supports_checkpoint_interval}" == "true" ]]; then
-  CMD+=(--checkpoint-every-n-tokens "${CHECKPOINT_EVERY_N_TOKENS}")
-fi
-
-if [[ -n "${HTTP_TRACE_DIR}" ]]; then
-  CMD+=(--http-trace-dir "${HTTP_TRACE_DIR}")
-fi
-
-if [[ -n "${HTTP_TRACE_MAX_BYTES}" ]]; then
-  CMD+=(--http-trace-max-bytes "${HTTP_TRACE_MAX_BYTES}")
-fi
-
-# Add extra flags if specified or defaulted
-if [[ -n "${EFFECTIVE_EXTRA_FLAGS}" ]]; then
-  # shellcheck disable=SC2206
-  CMD+=(${EFFECTIVE_EXTRA_FLAGS})
-fi
-
-if [[ "${PRINT_EXEC_START}" == "true" ]]; then
-  printf '%q ' "${CMD[@]}"
-  printf '\n'
-  exit 0
-fi
+echo "starting llama.cpp server"
+echo "- binary:  ${LLAMA_SERVER}"
+"${LLAMA_SERVER}" --version 2>&1 | awk '/^version: / || /^built with /{print "- " $0}' || true
+echo "- model:   ${MODEL_PATH}"
+echo "- alias:   ${MODEL_ALIAS}"
+echo "- bind:    ${HOST}:${PORT}"
+echo "- context: ${CONTEXT}"
+echo "- KV:      q8_0 / q8_0"
+echo "- cpu-moe: ${CPU_MOE}"
 
 if [[ "${DRY_RUN}" == "true" ]]; then
-  printf 'dry-run:'
-  printf ' %q' "${CMD[@]}"
-  printf '\n'
+  printf '%q ' "${CMD[@]}"
+  echo
   exit 0
 fi
 
-: > "${LOG_FILE}"
-
-# Start server via native service manager
-LAUNCHD_LABEL="com.devstral.llamacpp-${INSTANCE}"
-SYSTEMD_UNIT="devstral-llamacpp-${INSTANCE}"
-platform="$(detect_platform)"
-
-if [[ "${platform}" == "mac" ]]; then
-  if [[ "${LAUNCHER}" != "auto" && "${LAUNCHER}" != "launchd" && "${LAUNCHER}" != "background" ]]; then
-    die "invalid LLAMACPP_LAUNCHER for macOS: ${LAUNCHER} (expected: auto, launchd, background)"
-  fi
-  PLIST_PATH="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
-  launchctl unload "${PLIST_PATH}" 2>/dev/null || true
-
-  start_background() {
-    pid="$(
-      python3 - "${LOG_FILE}" "${CMD[@]}" <<'PY'
-import subprocess
-import sys
-
-log_path = sys.argv[1]
-cmd = sys.argv[2:]
-
-with open(log_path, "ab", buffering=0) as log_file:
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        close_fds=True,
-    )
-    print(proc.pid)
-PY
-    )"
-    if [[ -z "${pid}" ]]; then
-      die "failed to launch detached llama.cpp background process"
-    fi
-    echo "- managed by: background process"
-  }
-
-  if [[ "${LAUNCHER}" == "background" ]]; then
-    start_background
-  else
-    # macOS: launchd user agent
-    mkdir -p "${HOME}/Library/LaunchAgents"
-    local_args_xml=""
-    for arg in "${CMD[@]}"; do
-      arg="${arg//&/&amp;}"
-      arg="${arg//</&lt;}"
-      arg="${arg//>/&gt;}"
-      local_args_xml+="      <string>${arg}</string>
-"
-    done
-
-    cat > "${PLIST_PATH}" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${LAUNCHD_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-${local_args_xml}  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>DYLD_LIBRARY_PATH</key>
-    <string>${DYLD_LIBRARY_PATH:-}</string>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>${LOG_FILE}</string>
-  <key>StandardErrorPath</key>
-  <string>${LOG_FILE}</string>
-  <key>KeepAlive</key>
-  <false/>
-  <key>RunAtLoad</key>
-  <true/>
-</dict>
-</plist>
-PLIST
-
-    if launchctl load "${PLIST_PATH}" 2>/dev/null; then
-      sleep 1
-      pid="$(launchctl print "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null | awk '/\tpid = / {print $3; exit}')"
-      if [[ -z "${pid}" || "${pid}" == "-" ]]; then
-        die "launchd failed to start ${LAUNCHD_LABEL}. Check: ${LOG_FILE}"
-      fi
-      echo "- managed by: launchd (${LAUNCHD_LABEL})"
-    elif [[ "${LAUNCHER}" == "launchd" ]]; then
-      die "launchd failed to start ${LAUNCHD_LABEL}. Re-run with LLAMACPP_LAUNCHER=background if you are in an SSH/non-GUI session."
-    else
-      start_background
-    fi
-  fi
-
-else
-  # Linux/WSL: systemd user unit
-  if [[ "${LAUNCHER}" != "auto" && "${LAUNCHER}" != "systemd" ]]; then
-    die "invalid LLAMACPP_LAUNCHER for Linux/WSL: ${LAUNCHER} (expected: auto, systemd)"
-  fi
-  if ! command -v systemctl >/dev/null 2>&1; then
-    die "systemctl not found. systemd is required on Linux."
-  fi
-
-  UNIT_DIR="${HOME}/.config/systemd/user"
-  UNIT_PATH="${UNIT_DIR}/${SYSTEMD_UNIT}.service"
-  mkdir -p "${UNIT_DIR}"
-
-  printf -v exec_start_line '%q ' "${CMD[@]}"
-
-  cat > "${UNIT_PATH}" <<UNIT
-[Unit]
-Description=llama.cpp inference server (devstral-infra)
-
-[Service]
-Type=simple
-ExecStart=${exec_start_line}
-StandardOutput=append:${LOG_FILE}
-StandardError=append:${LOG_FILE}
-Environment=LD_LIBRARY_PATH=${LLAMA_SERVER_DIR}
-
-[Install]
-WantedBy=default.target
-UNIT
-
-  systemctl --user daemon-reload
-  systemctl --user stop "${SYSTEMD_UNIT}" 2>/dev/null || true
-  systemctl --user start "${SYSTEMD_UNIT}"
-  pid="$(systemctl --user show -p MainPID --value "${SYSTEMD_UNIT}")"
-  if [[ -z "${pid}" || "${pid}" == "0" ]]; then
-    die "systemd failed to start ${SYSTEMD_UNIT}. Check: journalctl --user -u ${SYSTEMD_UNIT}"
-  fi
-  echo "- managed by: systemd --user (${SYSTEMD_UNIT})"
-fi
-echo "${pid}" > "${PID_FILE}"
+nohup "${CMD[@]}" >"${LOG_FILE}" 2>&1 &
+SERVER_PID=$!
+echo "${SERVER_PID}" > "${PID_FILE}"
 echo "${PORT}" > "${PORT_FILE}"
+echo "- pid:     ${SERVER_PID}"
+echo "- log:     ${LOG_FILE}"
 
-# Wait for the model API to become ready. /health can succeed before inference is available.
-echo "Waiting for llama.cpp model API to become ready..."
-for (( i = 1; i <= START_TIMEOUT; i++ )); do
-  if curl -fsS "http://${PROBE_HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
+probe_host="${HOST}"
+[[ "${probe_host}" == "0.0.0.0" ]] && probe_host="127.0.0.1"
+
+echo "waiting for /v1/models (timeout ${START_TIMEOUT}s)..."
+deadline=$(( $(date +%s) + START_TIMEOUT ))
+while : ; do
+  if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+    tail -n 40 "${LOG_FILE}" >&2 || true
+    die "llama-server exited before becoming ready"
+  fi
+  if curl -fsS "http://${probe_host}:${PORT}/v1/models" >/dev/null 2>&1; then
     break
   fi
-  if (( i % 10 == 0 )); then
-    echo "Still waiting... (${i}s)"
-  fi
-  sleep 1
+  [[ $(date +%s) -ge ${deadline} ]] && die "timed out waiting for llama-server"
+  sleep 2
 done
-
-if ! curl -fsS "http://${PROBE_HOST}:${PORT}/v1/models" >/dev/null 2>&1; then
-  echo "Server started but not responding yet. Check log: ${LOG_FILE}"
-  echo "It may still be loading the model."
-fi
+echo "server is ready on http://${probe_host}:${PORT}/v1"
 
 if [[ "${SMOKE_TEST}" == "true" ]]; then
-  echo "Running chat-completions smoke test..."
-
-  model_id=""
-  for (( i = 1; i <= START_TIMEOUT; i++ )); do
-    model_id="$(
-      python3 - "http://${PROBE_HOST}:${PORT}/v1/models" <<'PY'
-import json
-import sys
-from urllib.request import urlopen
-
-with urlopen(sys.argv[1]) as response:
-    data = json.load(response)
-
-models = data.get("data") or []
-if not models:
-    raise SystemExit("no model ids returned by /v1/models")
-
-model_id = models[0].get("id")
-if not model_id:
-    raise SystemExit("missing model id in /v1/models response")
-
-print(model_id)
-PY
-    )" 2>/dev/null && break || true
-    if (( i % 10 == 0 )); then
-      echo "Still waiting for /v1/models to stabilize... (${i}s)"
-    fi
-    sleep 1
-  done
-
-  if [[ -z "${model_id}" ]]; then
-    echo "Smoke test failed: could not obtain model id from /v1/models"
-    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" "${INSTANCE}" >/dev/null 2>&1 || true
-    exit 1
+  echo "running chat smoke test..."
+  resp="$(curl -fsS "http://${probe_host}:${PORT}/v1/chat/completions" \
+    -H "content-type: application/json" \
+    -d '{"model":"qwen","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":16}')"
+  if [[ "${resp}" == *'"content"'* ]]; then
+    echo "smoke test OK"
+  else
+    echo "${resp}" >&2
+    die "smoke test did not return a chat completion"
   fi
-
-  smoke_payload="$(
-    python3 - "${model_id}" "${SMOKE_TEST_PROMPT}" <<'PY'
-import json
-import sys
-
-print(json.dumps({
-    "model": sys.argv[1],
-    "messages": [{"role": "user", "content": sys.argv[2]}],
-    "max_tokens": 256,
-    "temperature": 0.0,
-    "top_p": 1.0,
-    "top_k": 1,
-    "min_p": 0.0,
-}))
-PY
-  )"
-
-  smoke_response=""
-  smoke_error=""
-  smoke_ready="false"
-  for (( i = 1; i <= START_TIMEOUT; i++ )); do
-    smoke_response="$(
-      curl -sS \
-        -H 'Content-Type: application/json' \
-        "http://${PROBE_HOST}:${PORT}/v1/chat/completions" \
-        -d "${smoke_payload}" \
-        2>&1
-    )"
-    smoke_rc=$?
-    if [[ ${smoke_rc} -eq 0 ]]; then
-      smoke_ready="$(
-        python3 - "${smoke_response}" <<'PY'
-import json
-import sys
-
-data = json.loads(sys.argv[1])
-choice = (data.get("choices") or [{}])[0]
-message = choice.get("message") or {}
-content = message.get("content") or ""
-reasoning = message.get("reasoning_content") or ""
-if choice and (content or reasoning):
-    print("ready")
-else:
-    raise SystemExit("missing assistant content in smoke response")
-PY
-      )"
-      if [[ "${smoke_ready}" == "ready" ]]; then
-        smoke_ready="true"
-        break
-      fi
-      smoke_error="unexpected smoke response: ${smoke_response}"
-    else
-      smoke_error="${smoke_response}"
-    fi
-    if (( i % 10 == 0 )); then
-      echo "Still waiting for inference readiness... (${i}s)"
-    fi
-    sleep 1
-  done
-
-  if [[ "${smoke_ready}" != "true" ]]; then
-    echo "Smoke test failed: expected a valid assistant response"
-    printf '%s\n' "${smoke_error}"
-    bash "${SCRIPT_DIR}/server_stop_llamacpp.sh" "${INSTANCE}" >/dev/null 2>&1 || true
-    exit 1
-  fi
-
-  echo "Smoke test passed"
 fi
-
-cat <<EOF
-started llama.cpp [${INSTANCE}] (pid ${pid})
-- url: http://${HOST}:${PORT}/v1
-- log: ${LOG_FILE}
-- context: ${CONTEXT_SIZE} tokens
-- ctx checkpoints: ${CTX_CHECKPOINTS}
-- checkpoint interval: $(if [[ "${supports_checkpoint_interval}" == "true" ]]; then printf '%s tokens' "${CHECKPOINT_EVERY_N_TOKENS}"; else printf '%s' 'runtime default'; fi)
-- thinking: ${ENABLE_THINKING}
-
-Note: First request may be slow while model loads into memory.
-EOF

@@ -1,87 +1,86 @@
 #!/usr/bin/env bash
-# Setup llama.cpp for the local Qwen3.5 OpenCode profile with 256k context.
+# Fetch the latest ggml-org/llama.cpp release build for this platform and
+# unpack it into ${LLAMACPP_HOME} (default ~/.local/llama.cpp).
+#
+# The upstream GitHub Actions pipeline builds these zips from master on every
+# tag, so "latest release" is effectively "latest git master".
+#
+# Env overrides:
+#   LLAMACPP_HOME     target install dir (default ~/.local/llama.cpp)
+#   LLAMACPP_TAG      pin to a specific release tag (default: latest)
+#   LLAMACPP_FLAVOR   override backend asset (e.g. ubuntu-x64-cuda, win-x64-vulkan, macos-arm64)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
-LLAMACPP_VERSION="${LLAMACPP_VERSION:-latest}"
-LLAMACPP_DIR="${HOME}/.local/llama.cpp"
+have curl || die "curl is required"
+have unzip || die "unzip is required"
+have python3 || die "python3 is required"
 
-platform="$(detect_platform)"
-gpu="$(detect_gpu)"
-
-echo "=== Setting up llama.cpp ==="
-echo "Platform: ${platform}"
-echo "GPU: ${gpu}"
-
-# Determine which binary to download
-case "${platform}" in
-  mac)
-    ARCH="$(uname -m)"
-    if [[ "${ARCH}" == "arm64" ]]; then
-      BINARY_SUFFIX="macos-arm64"
-    else
-      BINARY_SUFFIX="macos-x64"
-    fi
-    ;;
-  linux|wsl)
-    if [[ "${gpu}" == "cuda" ]]; then
-      # Use Vulkan build for NVIDIA (works via Vulkan API, no CUDA toolkit needed)
-      BINARY_SUFFIX="ubuntu-vulkan-x64"
-    else
-      BINARY_SUFFIX="ubuntu-x64"
-    fi
-    ;;
-esac
-
-# Get latest release tag if not specified
-if [[ "${LLAMACPP_VERSION}" == "latest" ]]; then
-  echo "Fetching latest release..."
-  LLAMACPP_VERSION=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | \
-    grep '"tag_name"' | sed 's/.*"tag_name": "\([^"]*\)".*/\1/')
+PLATFORM="$(detect_platform)"
+ARCH="$(detect_arch)"
+GPU="$(detect_gpu)"
+FLAVOR="${LLAMACPP_FLAVOR:-}"
+if [[ -z "${FLAVOR}" ]]; then
+  case "${PLATFORM}-${GPU}" in
+    mac-metal)               FLAVOR="macos-arm64" ;;
+    linux-cuda|wsl-cuda)     FLAVOR="ubuntu-${ARCH}-cuda" ;;
+    linux-vulkan|wsl-vulkan) FLAVOR="ubuntu-${ARCH}-vulkan" ;;
+    linux-cpu|wsl-cpu)       FLAVOR="ubuntu-${ARCH}-cpu" ;;
+    windows-*)               FLAVOR="win-${ARCH}-vulkan" ;;
+    *) die "cannot infer llama.cpp release flavor for ${PLATFORM}/${GPU}" ;;
+  esac
 fi
 
-echo "Version: ${LLAMACPP_VERSION}"
-
-# Download URL
-DOWNLOAD_URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_VERSION}/llama-${LLAMACPP_VERSION}-bin-${BINARY_SUFFIX}.tar.gz"
-
-mkdir -p "${LLAMACPP_DIR}"
-cd "${LLAMACPP_DIR}"
-
-# Download and extract
-echo "Downloading from ${DOWNLOAD_URL}..."
-curl -L -o "llama-${LLAMACPP_VERSION}.tar.gz" "${DOWNLOAD_URL}"
-tar xzf "llama-${LLAMACPP_VERSION}.tar.gz"
-
-# Find the extracted directory
-EXTRACTED_DIR=$(find . -maxdepth 1 -type d -name "llama-*" | head -1)
-if [[ -z "${EXTRACTED_DIR}" ]]; then
-  die "Failed to find extracted llama.cpp directory"
+API="https://api.github.com/repos/ggml-org/llama.cpp/releases"
+if [[ -n "${LLAMACPP_TAG:-}" ]]; then
+  release_url="${API}/tags/${LLAMACPP_TAG}"
+else
+  release_url="${API}/latest"
 fi
 
-# Create symlinks for easy access
-ln -sf "${EXTRACTED_DIR}/llama-server" "${LLAMACPP_DIR}/llama-server"
-ln -sf "${EXTRACTED_DIR}/llama-cli" "${LLAMACPP_DIR}/llama-cli"
+echo "resolving llama.cpp release (${release_url})..."
+release_json="$(curl -fsSL "${release_url}")"
 
-# Verify installation
-if [[ ! -x "${LLAMACPP_DIR}/llama-server" ]]; then
-  die "llama-server not found or not executable"
+TAG="$(printf '%s' "${release_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+asset_url="$(printf '%s' "${release_json}" | python3 -c '
+import json, re, sys
+flavor = sys.argv[1]
+data = json.load(sys.stdin)
+pat = re.compile(rf"llama-.*-bin-{re.escape(flavor)}\.zip$")
+for asset in data["assets"]:
+    if pat.search(asset["name"]):
+        print(asset["browser_download_url"])
+        sys.exit(0)
+sys.exit(1)
+' "${FLAVOR}")" || die "no asset matching flavor '${FLAVOR}' in release ${TAG}"
+
+asset_name="$(basename "${asset_url}")"
+echo "tag: ${TAG}"
+echo "asset: ${asset_name}"
+
+mkdir -p "${LLAMACPP_HOME}"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "${tmpdir}"' EXIT
+
+echo "downloading ${asset_url}..."
+curl -fsSL -o "${tmpdir}/llama.zip" "${asset_url}"
+echo "unpacking into ${LLAMACPP_HOME}..."
+unzip -q -o "${tmpdir}/llama.zip" -d "${tmpdir}/unpacked"
+
+binary_dir="$(find "${tmpdir}/unpacked" -type f \( -name 'llama-server' -o -name 'llama-server.exe' \) -print -quit | xargs -I{} dirname {})"
+[[ -n "${binary_dir}" ]] || die "llama-server not found in downloaded archive"
+cp -R "${binary_dir}/." "${LLAMACPP_HOME}/"
+
+printf '%s\n' "${TAG}" > "${LLAMACPP_HOME}/VERSION"
+
+server="${LLAMACPP_HOME}/llama-server"
+[[ "${PLATFORM}" == "windows" ]] && server="${LLAMACPP_HOME}/llama-server.exe"
+chmod +x "${server}" 2>/dev/null || true
+
+echo "installed llama.cpp ${TAG} at ${LLAMACPP_HOME}"
+if [[ -x "${server}" ]]; then
+  "${server}" --version 2>&1 | head -5 || true
 fi
-
-VERSION_INFO=$("${LLAMACPP_DIR}/llama-server" --version 2>&1 | grep "version:" || echo "unknown")
-
-cat <<EOF
-OK (llama.cpp installed)
-- Directory: ${LLAMACPP_DIR}
-- Binary: ${BINARY_SUFFIX}
-- ${VERSION_INFO}
-
-Next:
-- Start server: scripts/server_start_llamacpp.sh
-- Configure OpenCode: scripts/opencode_set_llamacpp.sh
-- Configure Aider: scripts/aider_set_llamacpp.sh
-- Configure Qwen Code: scripts/qwencode_set_llamacpp.sh
-EOF

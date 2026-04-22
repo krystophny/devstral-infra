@@ -6,44 +6,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "========================================"
 echo "       devstral-infra Test Suite"
 echo "========================================"
-echo ""
 
 FAILED=0
-
 run_test() {
-  local name="$1"
-  local script="$2"
-  echo "----------------------------------------"
-  echo "Running: ${name}"
-  echo "----------------------------------------"
+  local name="$1" script="$2"
+  echo "---- ${name} ----"
   if bash "${script}"; then
-    echo ""
+    echo
   else
     echo "FAILED: ${name}"
-    echo ""
     FAILED=1
   fi
 }
 
-run_test "Setup Script Tests" "${SCRIPT_DIR}/test_setup.sh"
-run_test "Hardware Detection Tests" "${SCRIPT_DIR}/test_hardware_detect.sh"
-run_test "llama.cpp Profile Tests" "${SCRIPT_DIR}/test_llamacpp_profile.sh"
-run_test "vllm-mlx Profile Tests" "${SCRIPT_DIR}/test_vllm_mlx_profile.sh"
-run_test "Local Benchmark Harness Tests" "${SCRIPT_DIR}/test_local_benchmark_harness.sh"
-run_test "Vibe Config Tests" "${SCRIPT_DIR}/test_vibe_config.sh"
-run_test "Security Tests" "${SCRIPT_DIR}/test_security.sh"
-run_test "Mock Server Health Tests" "${SCRIPT_DIR}/test_server_health.sh"
-
-if [[ -n "${CI_SMOKE_TEST:-}" ]]; then
-  run_test "Smoke Test: Real Inference" "${SCRIPT_DIR}/test_server_inference.sh"
-fi
+run_test "llama.cpp Profile" "${SCRIPT_DIR}/test_llamacpp_profile.sh"
+run_test "Mock Server Health" "${SCRIPT_DIR}/test_server_health.sh"
 
 echo "========================================"
 if [[ "${FAILED}" -eq 0 ]]; then
-  echo "        All Tests Passed"
+  echo "All tests passed"
 else
-  echo "        Some Tests Failed"
+  echo "Some tests failed"
 fi
 echo "========================================"
-
 exit "${FAILED}"

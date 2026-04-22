@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""Manage the single blessed llama.cpp model for this repo.
+
+One alias, one repo, one quantization:
+    qwen3.6-35b-a3b-q4 -> bartowski/Qwen_Qwen3.6-35B-A3B-GGUF (Q4_K_M)
+
+Optional extra aliases live in OPTIONAL_ALIASES below. They are never
+downloaded automatically; `prefetch` only touches the default.
+"""
 from __future__ import annotations
 
 import argparse
@@ -8,20 +16,27 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 
-CACHE_ROOT = Path.home() / "Library" / "Caches" / "llama.cpp"
+def cache_root() -> Path:
+    explicit = os.environ.get("LLAMACPP_CACHE_ROOT", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "llama.cpp"
+    return Path.home() / ".cache" / "llama.cpp"
+
+
+CACHE_ROOT = cache_root()
 
 
 @dataclass(frozen=True)
 class ModelSpec:
     alias: str
-    family: str
     repo_id: str
     include: tuple[str, ...]
-    benchmark_enabled: bool
     default: bool = False
 
     @property
@@ -29,30 +44,21 @@ class ModelSpec:
         return CACHE_ROOT / self.repo_id.replace("/", "_")
 
 
-MODEL_SPECS: tuple[ModelSpec, ...] = (
-    ModelSpec("qwen3.5-0.8b", "qwen", "lmstudio-community/Qwen3.5-0.8B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.5-2b", "qwen", "lmstudio-community/Qwen3.5-2B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.5-4b", "qwen", "lmstudio-community/Qwen3.5-4B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.5-9b", "qwen", "lmstudio-community/Qwen3.5-9B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.5-27b", "qwen", "lmstudio-community/Qwen3.5-27B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.5-35b-a3b", "qwen", "lmstudio-community/Qwen3.5-35B-A3B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.5-122b-a10b", "qwen", "lmstudio-community/Qwen3.5-122B-A10B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.6-35b-a3b", "qwen", "unsloth/Qwen3.6-35B-A3B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3.6-35b-a3b-q4", "qwen", "bartowski/Qwen_Qwen3.6-35B-A3B-GGUF", ("*Q4_K_M*.gguf",), True, True),
-    ModelSpec("minimax-m2.5-q4", "minimax", "AesSedai/MiniMax-M2.5-GGUF", ("*Q4_K_M*.gguf",), True),
-    ModelSpec("gemma-4-31b-it", "gemma", "ggml-org/gemma-4-31B-it-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("gemma-4-26b-a4b-it", "gemma", "ggml-org/gemma-4-26B-A4B-it-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("gpt-oss-20b", "gpt-oss", "ggml-org/gpt-oss-20b-GGUF", ("*mxfp4*.gguf",), True),
-    ModelSpec("gpt-oss-120b", "gpt-oss", "ggml-org/gpt-oss-120b-GGUF", ("*mxfp4*.gguf",), True),
-    ModelSpec("nemotron-120b-a12b", "nemotron", "lmstudio-community/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3-coder-next", "qwen", "lmstudio-community/Qwen3-Coder-Next-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("qwen3-coder-30b-a3b", "qwen", "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("devstral-small-2-24b", "devstral", "lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF", ("*Q8_0*.gguf",), True),
-    ModelSpec("devstral-2-123b", "devstral", "lmstudio-community/Devstral-2-123B-Instruct-2512-GGUF", ("*Q8_0*.gguf",), True),
+DEFAULT_SPEC = ModelSpec(
+    alias="qwen3.6-35b-a3b-q4",
+    repo_id="bartowski/Qwen_Qwen3.6-35B-A3B-GGUF",
+    include=("*Q4_K_M*.gguf",),
+    default=True,
 )
 
-MODEL_BY_ALIAS = {model.alias: model for model in MODEL_SPECS}
-KEEP_DIRS = {"gguf-headers"}
+OPTIONAL_SPECS: tuple[ModelSpec, ...] = (
+    ModelSpec("qwen3.6-35b-a3b-q8", "unsloth/Qwen3.6-35B-A3B-GGUF", ("*Q8_0*.gguf",)),
+    ModelSpec("qwen3.5-35b-a3b-q4", "unsloth/Qwen3.5-35B-A3B-GGUF", ("*Q4_K_M*.gguf",)),
+    ModelSpec("qwen3.5-122b-a10b-q8", "lmstudio-community/Qwen3.5-122B-A10B-GGUF", ("*Q8_0*.gguf",)),
+)
+
+MODEL_SPECS: tuple[ModelSpec, ...] = (DEFAULT_SPEC, *OPTIONAL_SPECS)
+MODEL_BY_ALIAS = {m.alias: m for m in MODEL_SPECS}
 
 
 def find_cli() -> str:
@@ -60,19 +66,7 @@ def find_cli() -> str:
         path = shutil.which(candidate)
         if path:
             return path
-    raise RuntimeError("missing huggingface-cli or hf in PATH")
-
-
-def selected_models(mode: str, aliases: list[str]) -> list[ModelSpec]:
-    if aliases:
-        return [MODEL_BY_ALIAS[alias] for alias in aliases]
-    if mode == "benchmark":
-        return [model for model in MODEL_SPECS if model.benchmark_enabled]
-    if mode == "qwen":
-        return [model for model in MODEL_SPECS if model.family == "qwen"]
-    if mode == "gpt-oss":
-        return [model for model in MODEL_SPECS if model.family == "gpt-oss"]
-    return list(MODEL_SPECS)
+    raise RuntimeError("missing hf or huggingface-cli in PATH; install with: pip install --user huggingface_hub[cli]")
 
 
 def matching_files(model: ModelSpec) -> list[Path]:
@@ -80,159 +74,111 @@ def matching_files(model: ModelSpec) -> list[Path]:
     if model.cache_dir.exists():
         for path in sorted(model.cache_dir.rglob("*.gguf")):
             rel = path.relative_to(model.cache_dir).as_posix()
-            if any(fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(path.name, pattern) for pattern in model.include):
+            if any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(path.name, p) for p in model.include):
                 files.append(path)
     flat_prefix = model.repo_id.replace("/", "_") + "_"
     for path in sorted(CACHE_ROOT.glob(f"{flat_prefix}*.gguf")):
-        if any(fnmatch.fnmatch(path.name, f"{flat_prefix}{pattern}") or fnmatch.fnmatch(path.name, pattern) for pattern in model.include):
+        if any(fnmatch.fnmatch(path.name, f"{flat_prefix}{p}") or fnmatch.fnmatch(path.name, p) for p in model.include):
             files.append(path)
     return files
 
 
-def to_inventory_record(model: ModelSpec) -> dict:
+def record(model: ModelSpec) -> dict:
     files = matching_files(model)
     return {
         "alias": model.alias,
-        "family": model.family,
         "repo_id": model.repo_id,
-        "benchmark_enabled": model.benchmark_enabled,
         "default": model.default,
         "cache_dir": str(model.cache_dir),
         "present": bool(files),
-        "files": [str(path) for path in files],
-        "size_bytes": sum(path.stat().st_size for path in files),
+        "files": [str(p) for p in files],
+        "size_bytes": sum(p.stat().st_size for p in files),
         "primary_path": str(files[0]) if files else "",
     }
 
 
-def print_inventory(mode: str, aliases: list[str], json_output: bool) -> int:
-    records = [to_inventory_record(model) for model in selected_models(mode, aliases)]
-    if json_output:
+def cmd_inventory(args: argparse.Namespace) -> int:
+    records = [record(m) for m in MODEL_SPECS]
+    if args.json:
         print(json.dumps(records, indent=2))
         return 0
-    for record in records:
-        size_gb = record["size_bytes"] / (1024 ** 3)
-        status = "present" if record["present"] else "missing"
-        flags = []
-        if record["default"]:
-            flags.append("default")
-        if record["benchmark_enabled"]:
-            flags.append("benchmark")
-        print(f"{record['alias']}: {status} ({size_gb:.1f} GiB) [{' '.join(flags) or 'cache-only'}]")
-        print(f"  repo: {record['repo_id']}")
-        if record["primary_path"]:
-            print(f"  path: {record['primary_path']}")
+    for r in records:
+        gib = r["size_bytes"] / (1024 ** 3)
+        status = "present" if r["present"] else "missing"
+        tag = " [default]" if r["default"] else ""
+        print(f"{r['alias']}{tag}: {status} ({gib:.1f} GiB)")
+        print(f"  repo: {r['repo_id']}")
+        if r["primary_path"]:
+            print(f"  path: {r['primary_path']}")
     return 0
 
 
-def download_model(model: ModelSpec) -> int:
+def download(model: ModelSpec) -> int:
     files = matching_files(model)
     if files:
-        print(f"{model.alias}: already present")
+        print(f"{model.alias}: already present at {files[0]}")
         return 0
     cli = find_cli()
-    command = [
-        cli,
-        "download",
-        model.repo_id,
-        "--local-dir",
-        str(model.cache_dir),
-    ]
+    command = [cli, "download", model.repo_id, "--local-dir", str(model.cache_dir)]
     for pattern in model.include:
         command.extend(["--include", pattern])
     print(f"downloading {model.alias} from {model.repo_id}")
-    proc = subprocess.run(command, text=True)
-    return proc.returncode
+    return subprocess.run(command, text=True).returncode
 
 
-def prefetch(mode: str, aliases: list[str]) -> int:
-    rc = 0
-    for model in selected_models(mode, aliases):
-        result = download_model(model)
-        if result != 0:
-            rc = result
-            print(f"failed to download {model.alias}", file=sys.stderr)
-            break
-    return rc
+def cmd_prefetch(args: argparse.Namespace) -> int:
+    if args.alias:
+        if args.alias not in MODEL_BY_ALIAS:
+            print(f"unknown alias: {args.alias}", file=sys.stderr)
+            return 2
+        return download(MODEL_BY_ALIAS[args.alias])
+    return download(DEFAULT_SPEC)
 
 
-def cleanup() -> int:
-    keep_files = {path.resolve() for model in MODEL_SPECS for path in matching_files(model)}
-    removed = 0
-    if not CACHE_ROOT.exists():
-        return 0
-    for path in sorted(CACHE_ROOT.iterdir()):
-        if path.name in KEEP_DIRS:
-            continue
-        if path.is_dir():
-            if path.resolve() in {model.cache_dir.resolve() for model in MODEL_SPECS}:
-                for child in sorted(path.rglob("*"), reverse=True):
-                    if child.is_file() and child.resolve() not in keep_files:
-                        child.unlink()
-                        removed += 1
-                for child in sorted(path.rglob("*"), reverse=True):
-                    if child.is_dir():
-                        try:
-                            child.rmdir()
-                        except OSError:
-                            pass
-                try:
-                    path.rmdir()
-                except OSError:
-                    pass
-            else:
-                shutil.rmtree(path)
-                removed += 1
-        elif path.is_file():
-            path.unlink()
-            removed += 1
-    print(f"cleanup removed {removed} non-standard cache entries")
+def cmd_resolve(args: argparse.Namespace) -> int:
+    alias = args.alias or DEFAULT_SPEC.alias
+    if alias not in MODEL_BY_ALIAS:
+        print(f"unknown alias: {alias}", file=sys.stderr)
+        return 2
+    rec = record(MODEL_BY_ALIAS[alias])
+    if args.json:
+        print(json.dumps(rec, indent=2))
+    else:
+        print(rec["primary_path"])
+    return 0 if rec["present"] else 1
+
+
+def cmd_default_alias(_args: argparse.Namespace) -> int:
+    print(DEFAULT_SPEC.alias)
     return 0
 
 
-def resolve(alias: str, json_output: bool) -> int:
-    model = MODEL_BY_ALIAS[alias]
-    record = to_inventory_record(model)
-    if json_output:
-        print(json.dumps(record, indent=2))
-    else:
-        print(record["primary_path"])
-    return 0 if record["present"] else 1
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command", required=True)
+    p = argparse.ArgumentParser()
+    sub = p.add_subparsers(dest="command", required=True)
 
-    inventory_parser = sub.add_parser("inventory")
-    inventory_parser.add_argument("--mode", default="all", choices=("all", "benchmark", "qwen", "gpt-oss"))
-    inventory_parser.add_argument("--json", action="store_true")
-    inventory_parser.add_argument("aliases", nargs="*")
+    inv = sub.add_parser("inventory", help="list known models and their presence on disk")
+    inv.add_argument("--json", action="store_true")
+    inv.set_defaults(func=cmd_inventory)
 
-    prefetch_parser = sub.add_parser("prefetch")
-    prefetch_parser.add_argument("--mode", default="benchmark", choices=("all", "benchmark", "qwen", "gpt-oss"))
-    prefetch_parser.add_argument("aliases", nargs="*")
+    pf = sub.add_parser("prefetch", help="download the default model (or a named optional alias)")
+    pf.add_argument("alias", nargs="?")
+    pf.set_defaults(func=cmd_prefetch)
 
-    sub.add_parser("cleanup")
+    rs = sub.add_parser("resolve", help="print the on-disk path for an alias")
+    rs.add_argument("alias", nargs="?")
+    rs.add_argument("--json", action="store_true")
+    rs.set_defaults(func=cmd_resolve)
 
-    resolve_parser = sub.add_parser("resolve")
-    resolve_parser.add_argument("alias")
-    resolve_parser.add_argument("--json", action="store_true")
+    da = sub.add_parser("default-alias", help="print the blessed default alias")
+    da.set_defaults(func=cmd_default_alias)
 
-    return parser.parse_args()
+    return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if args.command == "inventory":
-        return print_inventory(args.mode, args.aliases, args.json)
-    if args.command == "prefetch":
-        return prefetch(args.mode, args.aliases)
-    if args.command == "cleanup":
-        return cleanup()
-    if args.command == "resolve":
-        return resolve(args.alias, args.json)
-    return 1
+    return args.func(args)
 
 
 if __name__ == "__main__":

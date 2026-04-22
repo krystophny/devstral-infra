@@ -1,328 +1,81 @@
 # devstral-infra
 
-Cross-platform local inference server for coding AI models.
+Single-path local coding stack: **llama.cpp + Qwen3.6 35B A3B (Q4_K_M) + OpenCode**,
+packaged so a USB stick hands it to a Linux, macOS, or Windows machine with no
+root, no admin, and no internet.
 
 License: [MIT](LICENSE)
 
-> **Disclaimer**: This is experimental, vibe-coded infrastructure. No warranty
-> of any kind. Use at your own risk. Not affiliated with Mistral AI.
+## The one blessed configuration
 
-- **Auto-detection**: Automatically selects optimal model and configuration based on hardware
-- **Cross-platform**: macOS (llama.cpp, mlx-lm, vllm-mlx, vllm-metal, oMLX), Linux (vLLM + CUDA/CPU), Windows (WSL)
-- **Tool calling**: Full tool use support for coding assistants
-- **Vibe integration**: Configure Mistral Vibe CLI to use your local server
-- **OpenCode integration**: Configure OpenCode CLI for efficient tool calling
-- **llama.cpp local benchmark profile**: Uses a real local build from upstream `llama.cpp` `master`, standardizes benchmark Qwen lanes on explicit aliases and cache paths, and supports official `GPT-OSS` `MXFP4`
-- **Security hardening**: Optional network isolation for Vibe, OpenCode, and LM Studio
+| Target           | OS      | GPU          | Memory         | Backend | CPU-MoE |
+| ---------------- | ------- | ------------ | -------------- | ------- | ------- |
+| Local (this box) | Linux   | NVIDIA 16 GB | 96 GB          | CUDA    | on      |
+| Intel Arc box    | Windows | Intel Arc    | 32 GB shared   | Vulkan  | on      |
+| Apple M1         | macOS   | M1           | 32 GB unified  | Metal   | off     |
 
-## Quick Start
+- **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M` (~20 GB).
+- **Runtime**: `llama-server` (upstream release, Q8_0 KV, 128 K context, `-fa on`, `--jinja`).
+- **Harness**: `opencode`, title generation disabled, `reasoning: true`, `thinking_budget: 4096`.
 
-```bash
-chmod +x scripts/*.sh ci/*.sh ci/*.py
-scripts/server_start_llamacpp.sh  # Start local llama.cpp benchmark server on port 8080
-scripts/server_start_mlx_lm.sh    # Start direct mlx-lm HTTP server
-scripts/server_start_vllm_mlx.sh  # Start vllm-mlx on Apple Silicon
-scripts/server_start_vllm_metal.sh  # Start vllm-metal
-scripts/server_start_omlx.sh      # Start oMLX
-scripts/benchmark_local_stacks.sh # Benchmark all local Mac stacks against the same Qwen 9B 4-bit weights
-```
+Nothing else is downloaded automatically. Optional aliases live in
+`scripts/llamacpp_models.py` for manual prefetch only.
 
-### BGE-M3 Embeddings with llama.cpp
-
-```bash
-LLAMACPP_EMBEDDING_MODEL=/home/user/.local/share/local-llm/models/bge-m3.gguf \
-LLAMACPP_EMBEDDING_PORT=11434 \
-LLAMACPP_EMBEDDING_ALIAS=bge-m3 \
-scripts/server_start_bge_llamacpp.sh
-```
-
-```bash
-scripts/server_stop_bge_llamacpp.sh
-```
-
-This keeps the same API port (`11434`) while switching the embedding backend from Ollama to llama.cpp.
-
-## Platform Backends
-
-| Platform | Backend | GPU | Tool Calling | Port |
-|----------|---------|-----|--------------|------|
-| macOS (Apple Silicon) | llama.cpp | Metal | Yes | 8080 |
-| macOS (Apple Silicon) | mlx-lm | MLX | Yes | 8080 |
-| macOS (Apple Silicon) | vllm-mlx | MLX | Yes | 8080 |
-| macOS (Apple Silicon) | vllm-metal | Metal | Yes | 8080 |
-| macOS (Apple Silicon) | oMLX | MLX | Yes | 8000 |
-| Linux | vLLM | NVIDIA CUDA | Yes | 8080 |
-| Windows | WSL + LM Studio | NVIDIA | Yes | 1234 |
-
-## Supported Models
-
-| Model | Parameters | Memory (4-bit) | Context | Use Case |
-|-------|------------|----------------|---------|----------|
-| devstral-small-2 | 24B | ~15 GB | 32K | Vibe, OpenCode |
-| GLM-4.7-REAP-50 | 47B | ~30 GB | 32K | OpenCode (reasoning) |
-| Qwen3.5-122B-A10B Q8_0 | 122B A10B | ~131 GB GGUF + runtime buffers | 256K | OpenCode local llama.cpp |
-| devstral-2 | 123B | ~75 GB | 32K | High-end hardware |
-
-## Commands
-
-### Setup
-
-```bash
-scripts/lmstudio_install.sh       # Install LM Studio + lms CLI
-scripts/lmstudio_download_models.sh  # Download recommended models
-```
-
-### Server
-
-```bash
-scripts/lmstudio_server_start.sh  # Start LM Studio API server
-scripts/lmstudio_server_stop.sh   # Stop server
-```
-
-**macOS/Linux (LM Studio):**
-```bash
-# Default port: 1234
-# API: http://127.0.0.1:1234/v1
-
-# Load a model:
-lms load mistralai/devstral-small-2-2512
-
-# List models:
-lms ls
-```
-
-**Linux (vLLM alternative):**
-```bash
-scripts/server_start.sh  # Start vLLM server on port 8080
-scripts/server_stop.sh   # Stop server
-```
-
-### Vibe Integration
-
-```bash
-scripts/vibe_install.sh       # Install Vibe CLI
-scripts/vibe_set_lmstudio.sh  # Configure Vibe for LM Studio
-scripts/vibe_unset_local.sh   # Restore original Vibe config
-```
-
-### OpenCode Integration
-
-```bash
-scripts/opencode_install.sh       # Install OpenCode CLI
-scripts/opencode_set_lmstudio.sh  # Configure OpenCode for LM Studio
-scripts/opencode_set_llamacpp.sh  # Configure OpenCode for local llama.cpp
-scripts/opencode_set_vllm_mlx.sh  # Configure OpenCode for local vllm-mlx
-scripts/opencode_set_omlx.sh      # Configure OpenCode for local oMLX
-scripts/opencode_unset_local.sh   # Restore original OpenCode config
-scripts/benchmark_local_stacks.sh # Run the local Mac benchmark harness
-```
-
-### llama.cpp Local Benchmark Profile
-
-```bash
-scripts/setup_llamacpp.sh
-scripts/server_start_llamacpp.sh
-scripts/opencode_set_llamacpp.sh
-```
-
-Recommended local profile:
-- default OpenCode model: `Qwen3.5-9B`
-- default OpenCode llama.cpp endpoint: `http://127.0.0.1:8081/v1`
-- supported local Qwen family: `0.8B`, `2B`, `4B`, `9B`, `27B`, `35B-A3B`, `122B-A10B`, plus benchmark aliases `qwen3.6-35b-a3b` (`Q8_0`) and `qwen3.6-35b-a3b-q4` (`Q4_K_M`)
-- supported local GPT-OSS family: `20B` `MXFP4`, `120B` `MXFP4`
-- context: `65536`
-- context checkpoints: `64`
-- checkpoint interval: `4096`
-- batch / ubatch: `2048 / 512`
-- KV cache quantization: `K=q8_0`, `V=q8_0` by default unless explicit `-ctk` / `-ctv` flags override it
-- thinking: `on` by default for the OpenCode fast profile
-- WebUI: enabled by default on the llama.cpp server
-- clients that need a fast non-thinking turn should disable thinking per request instead of forcing the server off globally
-- OpenCode sampling defaults for precise coding: `temperature=0.6`, `top_p=0.95`, `top_k=20`, `min_p=0.0`, `presence_penalty=0.0`, `repeat_penalty=1.0`
-- OpenCode permissions: `allow` by default for the generated local profile
-- launcher: `launchd` user agent on macOS, `systemd --user` on Linux
-- optional launcher override: `LLAMACPP_LAUNCHER=background` to avoid `launchd` state during SSH or benchmark automation
-- readiness gate: waits for `/v1/models`, not just `/health`
-- startup now runs a real `POST /v1/chat/completions` smoke test and fails fast if inference is broken
-- verify the actual `llama-server` binary version before drawing conclusions; stale local builds were a major source of earlier confusion
-- by default the launcher prefers `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server` when that real local build exists
-- normalized local cache root: `~/Library/Caches/llama.cpp/`
-- use `scripts/llamacpp_prefetch_models.sh --mode benchmark` to prefetch the active benchmark set
-- use `scripts/llamacpp_model_inventory.sh --json` to inspect exact resolved paths
-- use `LLAMACPP_MODEL_ALIAS=<alias>` to switch benchmark models without changing scripts
-- benchmark note: `qwen3.6-35b-a3b` resolves to the cached `unsloth/Qwen3.6-35B-A3B-GGUF` `Q8_0` GGUF, while `qwen3.6-35b-a3b-q4` resolves to the cached `bartowski/Qwen/Qwen3.6-35B-A3B-GGUF` `Q4_K_M` GGUF with the same llama.cpp runtime settings
-
-Environment overrides:
-- `LLAMACPP_SERVER_BIN`
-- `LLAMACPP_MODEL` or `LLAMACPP_HF_MODEL`
-- `LLAMACPP_CONTEXT`
-- `LLAMACPP_CTX_CHECKPOINTS`
-- `LLAMACPP_CHECKPOINT_EVERY_N_TOKENS`
-- `LLAMACPP_BATCH`
-- `LLAMACPP_UBATCH`
-- `LLAMACPP_ENABLE_THINKING`
-- `LLAMACPP_SMOKE_TEST`
-- `LLAMACPP_LAUNCHER`
-
-### Local Stack Benchmark Suite
-
-```bash
-scripts/benchmark_local_stacks.sh
-```
-
-What it does:
-- benchmarks the same local `Qwen3.5-9B` `Q4_K_M` `GGUF` and `Qwen3.5-9B-4bit` `MLX` weights across `llama.cpp`, `mlx-lm`, `vllm-mlx`, `vllm-metal`, and `oMLX`
-- measures `TTFT`, prompt-side throughput, decode-side throughput, `TPOT`, end-to-end latency, and parallel request throughput
-- prefixes a per-iteration marker on single-request prompts so repeated runs stay cold instead of hitting prefix caches
-- writes `summary.md`, `summary.csv`, `raw.csv`, `parallel.csv`, `summary.json`, `raw.json`, `parallel.json`, and `failures.json`
-
-Defaults:
-- iterations: `2`
-- max generation tokens: `128`
-- parallel requests: `4`
-- output dir: `/tmp/devstral-infra-benchmarks/local-stacks-<timestamp>`
-
-Useful overrides:
-- `OUTPUT_DIR=/path/to/output`
-- `scripts/benchmark_local_stacks.sh --iterations 1 --max-tokens 64`
-- `scripts/benchmark_local_stacks.sh --parallel-requests 8`
-- `scripts/benchmark_local_stacks.sh --stacks llamacpp mlx-lm vllm-mlx`
-- `scripts/benchmark_local_stacks.sh --thinking on`
-
-Latest snapshot:
-- date: `2026-04-07`
-- machine: Apple Silicon Mac with `32 GB` RAM, `24 GB` VRAM, `metal` GPU backend
-- thinking: `on`
-- `llama.cpp`: upstream `ggml-org/llama.cpp` `master`, commit `15f786e65`, built locally at `/Users/user/code/llama.cpp-dev/llama.cpp/build/bin/llama-server`
-- command: `scripts/benchmark_local_stacks.sh --thinking on`
-- note: the `llama.cpp` row below comes from an immediate `--stacks llamacpp` rerun after a transient connection drop during the full-suite parallel phase; all rows use the same tuned cold-prompt settings
-
-```text
-+------------+-----------+-------------------+------------------+------------------+
-| stack      | short ms  | decode tok/s      | long ms          | parallel req/s   |
-+------------+-----------+-------------------+------------------+------------------+
-| llama.cpp  | TTFT 406  | 17.87             | TTFT 62270       | 0.13             |
-| mlx-lm     | TTFT 746  | 34.09             | TTFT 76323       | 0.25             |
-| vllm-mlx   | TTFT 641  | 32.86             | TTFT 72551       | 0.22             |
-| vllm-metal | TTFT 4414 | buffered response | TTFT 76867       | 0.21             |
-| oMLX       | TTFT 808  | 32.80             | TTFT 73259       | 0.23             |
-+------------+-----------+-------------------+------------------+------------------+
-```
-
-Notes:
-- completion-token metrics in this snapshot include reasoning tokens when the runtime emits them
-- tuned cold-prompt serving flipped the short-TTFT result: `llama.cpp` is now clearly best for first token on this machine, while the MLX-family servers still win decode throughput
-- `mlx-lm` remains the strongest overall MLX path here, with the best sustained decode throughput and best parallel throughput
-- `vllm-mlx` improved substantially with explicit `max-num-seqs`, `prefill-batch-size`, `completion-batch-size`, `stream-interval`, and `prefill-step-size` settings, but long-prompt TTFT still tracks the other MLX servers because long prefill dominates
-- `vllm-metal` exposed an OpenAI-compatible endpoint, but this benchmark path observed buffered completions rather than token streaming.
-- `oMLX` now stays up in the background and serves real `/v1/chat/completions` requests against the same MLX Qwen snapshot.
-
-### One-Command Setup (GLM-4.7 + OpenCode)
-
-```bash
-scripts/lmstudio_set_local.sh  # Downloads GLM-4.7, starts server, configures OpenCode
-```
-
-### Security (Optional)
-
-```bash
-scripts/security_harden.sh   # Block Vibe, OpenCode, LM Studio network access
-scripts/security_unharden.sh # Restore network access
-```
-
-**Important:** Download all required models BEFORE hardening:
-```bash
-lms get mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit
-lms get mlx-community/GLM-4.7-REAP-50-mxfp4
-scripts/security_harden.sh
-```
-
-### Cleanup
-
-```bash
-scripts/teardown.sh  # Remove venv, caches, PID files
-```
-
-## Verify Server
-
-```bash
-# Check server status
-curl -s http://127.0.0.1:1234/v1/models | python -m json.tool
-
-# Test chat completion
-curl -s http://127.0.0.1:1234/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"mistralai/devstral-small-2-2512","messages":[{"role":"user","content":"Hello"}]}' \
-  | python -m json.tool
-```
-
-## Environment Variables
-
-### LM Studio Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LMSTUDIO_PORT` | 1234 | API server port |
-| `LMSTUDIO_HOST` | 127.0.0.1 | Bind address |
-| `LMSTUDIO_MODEL_ID` | auto | Model to load |
-| `LMSTUDIO_CONTEXT_SIZE` | 32768 | Context length |
-
-### Vibe Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VIBE_CONFIG_PATH` | ~/.vibe/config.toml | Config file path |
-| `VIBE_LOCAL_MODEL_ID` | mistralai/devstral-small-2-2512 | Model ID |
-
-### OpenCode Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENCODE_CONFIG_PATH` | ~/.config/opencode/opencode.json | Config file path |
-| `OPENCODE_LOCAL_MODEL_ID` | mistralai/devstral-small-2-2512 | Model ID |
-
-## Architecture
+## Install from a USB stick
 
 ```
-scripts/
-  _common.sh              # Shared utilities, hardware detection
-  lmstudio_install.sh     # Install LM Studio + lms CLI
-  lmstudio_download_models.sh # Download recommended models
-  lmstudio_server_start.sh    # Start LM Studio API server
-  lmstudio_server_stop.sh     # Stop server
-  lmstudio_set_local.sh       # One-command GLM-4.7 + OpenCode setup
-  vibe_install.sh         # Install Vibe CLI
-  vibe_set_lmstudio.sh    # Configure Vibe for LM Studio
-  vibe_unset_local.sh     # Restore Vibe config
-  opencode_install.sh     # Install OpenCode CLI
-  opencode_set_lmstudio.sh    # Configure OpenCode for LM Studio
-  opencode_unset_local.sh     # Restore OpenCode config
-  security_harden.sh      # Network isolation
-  security_unharden.sh    # Restore network access
-  setup.sh                # Platform dispatcher
-  setup_linux.sh          # Linux vLLM setup
-  setup_wsl.sh            # WSL setup
-  server_start.sh         # Start server (LM Studio on Mac, vLLM on Linux)
-  server_stop.sh          # Stop server
-  teardown.sh             # Cleanup
-
-server/
-  run_devstral_server.py  # vLLM launcher (Linux only)
-
-ci/
-  mock_server.py          # Pure-stdlib mock for testing
-  run_tests.sh            # Test runner
-  test_*.sh               # Test suites
+./<target>/install.sh          # linux-cuda or mac-m1
+.\windows-arc\install.bat      # windows-arc (no admin)
 ```
 
-## CI/CD
+The installer copies `llama.cpp/`, `opencode/`, and the model into the user
+profile (`~/.local/qwenstack` on Linux, `~/Library/Application Support/qwenstack`
+on macOS, `%USERPROFILE%\qwenstack` on Windows), registers a user-level service
+(`systemd --user`, `launchd`, or a logon-triggered `schtasks`), and writes the
+OpenCode config. OpenCode points at `http://127.0.0.1:8080/v1`.
 
-GitHub Actions runs:
-- **lint**: shellcheck on all scripts
-- **test-linux**: Mock server tests on Ubuntu
-- **test-macos**: Mock server tests on macOS
-- **test-wsl**: Mock server tests in WSL
+## Install from this repo (local development)
 
-## License
+```
+scripts/setup_llamacpp.sh                     # fetch latest upstream release for this OS
+python3 scripts/llamacpp_models.py prefetch   # download the blessed model
+scripts/server_start_llamacpp.sh              # foreground run, smoke test
+scripts/opencode_install.sh                   # curl|bash the opencode CLI
+scripts/opencode_set_llamacpp.sh              # write ~/.config/opencode/opencode.json
+opencode                                      # go
+```
 
-MIT
+## Build the USB bundle
+
+```
+python3 scripts/llamacpp_models.py prefetch   # ensure the model is cached
+scripts/build_bundle.sh all --out /tmp/qwenstack
+```
+
+Layout it produces:
+
+```
+/tmp/qwenstack/
+  README.txt
+  models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
+  linux-cuda/   {llama.cpp/, opencode/, install.sh, start.sh}
+  mac-m1/       {llama.cpp/, opencode/, install.sh, start.sh}
+  windows-arc/  {llama.cpp/, opencode/, install.bat, start.bat}
+```
+
+Then format a USB stick to exFAT (FAT32 cannot hold the 20 GB single file) and
+copy the tree over:
+
+```
+scripts/usb_format.sh /dev/sdX QWENSTACK   # requires sudo, typed confirmation
+rsync -a /tmp/qwenstack/ /run/media/$USER/QWENSTACK/
+```
+
+## Tests
+
+```
+bash ci/run_tests.sh
+```
+
+Exercises the llama.cpp launcher (dry-run), the OpenCode config generator, and
+a pure-stdlib mock-server health check. Real inference is out of scope for CI.
