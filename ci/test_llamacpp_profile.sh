@@ -25,6 +25,7 @@ EOF
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_PORT=18080 \
     LLAMACPP_SMOKE_TEST=false \
     LLAMACPP_DRY_RUN=true \
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
@@ -45,7 +46,10 @@ EOF
         "${output}" == *"--alias qwen"* && \
         "${output}" == *"--jinja"* && \
         "${output}" == *"--reasoning-format deepseek"* && \
-        "${output}" == *"--port 8081"* && \
+        "${output}" == *"--top-p 0.95"* && \
+        "${output}" == *"--top-k 20"* && \
+        "${output}" == *"--port 18080"* && \
+        "${output}" == *"-np 1"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
         "${cpu_moe_ok}" == "1" ]]; then
     echo "PASS: launcher emits the blessed profile"
@@ -66,7 +70,7 @@ test_opencode_config() {
   OPENCODE_CONFIG_PATH="${config_path}" \
   bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
 
-  if grep -q '"model": "llamacpp/qwen3.6-35b-a3b-q4"' "${config_path}" && \
+  if grep -q '"model": "llamacpp/qwen"' "${config_path}" && \
      grep -q '"disable": true' "${config_path}" && \
      grep -q '"permission": "allow"' "${config_path}" && \
      grep -q '"context": 131072' "${config_path}" && \
@@ -79,7 +83,8 @@ test_opencode_config() {
      grep -q '"min_p": 0.0' "${config_path}" && \
      grep -q '"presence_penalty": 0.0' "${config_path}" && \
      grep -q '"repeat_penalty": 1.0' "${config_path}" && \
-     grep -q 'http://127.0.0.1:8081/v1' "${config_path}" && \
+     grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local)' "${config_path}" && \
+     grep -q 'http://127.0.0.1:8080/v1' "${config_path}" && \
      grep -q '"disabled_providers": \["exa", "openai", "anthropic"' "${config_path}"; then
     echo "PASS: OpenCode config matches the blessed profile"
   else

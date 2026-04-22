@@ -7,12 +7,12 @@ Guidance for Claude Code working inside this repository.
 One blessed local coding stack, nothing else:
 
 - **Runtime**: `llama-server` from the latest upstream ggml-org/llama.cpp release.
-- **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M`, alias `qwen3.6-35b-a3b-q4`.
+- **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M`, launched from alias `qwen3.6-35b-a3b-q4` and served as `qwen`.
 - **Harness**: `opencode` CLI, title generation disabled, reasoning on.
 
-Bundle targets run the server on `127.0.0.1:8080`; the local development
-box (this repo's scripts) uses `127.0.0.1:8081` because another service
-holds 8080 here.
+Bundle targets and the local development scripts both use port `8080`. The
+launcher binds `0.0.0.0` by default so the host can also expose the service on
+the LAN when desired.
 
 | OS      | Backend | CPU-MoE | User service          |
 | ------- | ------- | ------- | --------------------- |
@@ -30,7 +30,7 @@ scripts/
   _common.sh                    shared bash helpers (paths, platform detect, stop_pid)
   setup_llamacpp.sh             fetch latest upstream release, unpack to ~/.local/llama.cpp
   llamacpp_models.py            one default model + optional aliases; prefetch/resolve
-  server_start_llamacpp.sh      single-instance launcher (port 8081 locally; 8080 in bundles)
+  server_start_llamacpp.sh      single-instance launcher (port 8080, LAN-capable by default)
   server_stop_llamacpp.sh
   opencode_install.sh           curl|bash (online) or OPENCODE_OFFLINE_ARCHIVE (USB)
   opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json
@@ -59,9 +59,10 @@ Q4_K_M experts on GPU; the M1's unified memory makes CPU-MoE counterproductive).
 ## Don't reintroduce
 
 Explicitly out of scope — do not add LM Studio, vLLM, vLLM-MLX, MLX-LM, oMLX,
-Vibe, aider, qwen-code, Codex, SearXNG, BGE embeddings, benchmarking harnesses,
+Vibe, aider, qwen-code, Codex, SearXNG, BGE embeddings, extra local stacks,
 `security_harden.sh`, dual-instance local/fast servers, or anything that auto-
-downloads a second model. If one of those becomes useful again, add it
+downloads another model family beyond the small manual alias list in
+`scripts/llamacpp_models.py`. If one of those becomes useful again, add it
 deliberately and update this file.
 
 ## USB stick note

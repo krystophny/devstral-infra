@@ -2,8 +2,8 @@
 # Configure OpenCode for the local llama.cpp server.
 #
 # Single blessed profile: Qwen3.6 35B A3B Q4_K_M over the local
-# llama-server on http://127.0.0.1:8081/v1, with title generation
-# disabled for latency and all non-local providers off.
+# llama-server on http://127.0.0.1:8080/v1, served as model "qwen",
+# with title generation disabled for latency and all non-local providers off.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,14 +11,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 
 HOST="${LLAMACPP_HOST:-127.0.0.1}"
-PORT="${LLAMACPP_PORT:-8081}"
+PORT="${LLAMACPP_PORT:-8080}"
 API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
-MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen3.6-35b-a3b-q4}"
+MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen}"
 CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-131072}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-16384}"
 PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-llama.cpp (Local)}"
-MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-Qwen3.6 35B A3B Q4 (Local)}"
+MODEL_NAME="${OPENCODE_LOCAL_MODEL_NAME:-Qwen3.6 35B A3B Q4 + KV-Q8 (Local)}"
 TEMPERATURE="${OPENCODE_LOCAL_TEMPERATURE:-0.6}"
 TOP_P="${OPENCODE_LOCAL_TOP_P:-0.95}"
 TOP_K="${OPENCODE_LOCAL_TOP_K:-20}"

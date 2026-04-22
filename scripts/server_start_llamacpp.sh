@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start llama-server on port 8081 with the blessed Qwen3.6 35B A3B Q4_K_M profile:
+# Start llama-server with the blessed Qwen3.6 35B A3B Q4_K_M profile:
 #   - 128K context (131072), Q8_0 KV cache, flash attention
 #   - CPU-MoE on for Linux/Windows (MoE experts on CPU, attention on GPU)
 #   - Single bound alias "qwen", Jinja templating, reasoning enabled
@@ -10,8 +10,9 @@
 #   LLAMACPP_MODEL      explicit GGUF path (else resolved via llamacpp_models.py)
 #   LLAMACPP_MODEL_ALIAS alias to resolve from the model registry (default: blessed)
 #   LLAMACPP_CONTEXT    context size (default 131072)
-#   LLAMACPP_PORT       listen port (default 8081; bundles default to 8080)
-#   LLAMACPP_HOST       bind host (default 127.0.0.1)
+#   LLAMACPP_PORT       listen port (default 8080)
+#   LLAMACPP_HOST       bind host (default 0.0.0.0)
+#   LLAMACPP_PARALLEL   max concurrent sessions / slots (default 1)
 #   LLAMACPP_CPU_MOE    force on/off (default: on for non-Mac)
 #   LLAMACPP_DRY_RUN    true to print the command and exit
 #   LLAMACPP_SMOKE_TEST false to skip the post-start /v1/chat/completions probe
@@ -55,12 +56,13 @@ fi
 [[ -f "${MODEL_PATH}" || "${LLAMACPP_DRY_RUN:-false}" == "true" ]] || die "model file missing: ${MODEL_PATH}"
 
 # --- Runtime parameters ---
-HOST="${LLAMACPP_HOST:-127.0.0.1}"
-PORT="${LLAMACPP_PORT:-8081}"
+HOST="${LLAMACPP_HOST:-0.0.0.0}"
+PORT="${LLAMACPP_PORT:-8080}"
 CONTEXT="${LLAMACPP_CONTEXT:-131072}"
 BATCH="${LLAMACPP_BATCH:-2048}"
 UBATCH="${LLAMACPP_UBATCH:-512}"
 NGL="${LLAMACPP_NGL:-99}"
+PARALLEL="${LLAMACPP_PARALLEL:-1}"
 
 CPU_MOE_DEFAULT="false"
 [[ "${PLATFORM}" != "mac" ]] && CPU_MOE_DEFAULT="true"
@@ -76,6 +78,31 @@ START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
 
 stop_llamacpp_port_occupants "${PORT}" "llama.cpp server"
 
+SAMPLER_ARGS=()
+case "${MODEL_ALIAS}" in
+  minimax-*)
+    SAMPLER_ARGS+=(
+      --temp 1.0
+      --top-p 0.95
+      --top-k 40
+      --reasoning on
+    )
+    ;;
+  *)
+    SAMPLER_ARGS+=(
+      --temp 0.6
+      --top-p 0.95
+      --top-k 20
+      --min-p 0
+      --presence-penalty 0.0
+      --repeat-penalty 1.0
+      --reasoning-format deepseek
+      --no-context-shift
+      --reasoning on
+    )
+    ;;
+esac
+
 CMD=(
   "${LLAMA_SERVER}"
   -m "${MODEL_PATH}"
@@ -90,9 +117,9 @@ CMD=(
   --port "${PORT}"
   --alias qwen
   --jinja
-  --reasoning-format deepseek
-  -np 1
+  -np "${PARALLEL}"
 )
+CMD+=("${SAMPLER_ARGS[@]}")
 if [[ "${CPU_MOE}" == "true" ]]; then
   CMD+=(--cpu-moe)
 fi
@@ -104,6 +131,7 @@ echo "- model:   ${MODEL_PATH}"
 echo "- alias:   ${MODEL_ALIAS}"
 echo "- bind:    ${HOST}:${PORT}"
 echo "- context: ${CONTEXT}"
+echo "- slots:   ${PARALLEL}"
 echo "- KV:      q8_0 / q8_0"
 echo "- cpu-moe: ${CPU_MOE}"
 
