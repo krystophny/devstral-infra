@@ -14,12 +14,13 @@ License: [MIT](LICENSE)
 | Intel Arc box    | Windows | Intel Arc    | 32 GB shared   | Vulkan  | on      |
 | Apple M1         | macOS   | M1           | 32 GB unified  | Metal   | off     |
 
-- **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M` (~20 GB).
+- **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M` (~20 GB), served as `qwen`.
 - **Runtime**: `llama-server` (upstream release, Q8_0 KV, 128 K context, `-fa on`, `--jinja`).
 - **Harness**: `opencode`, title generation disabled, `reasoning: true`, `thinking_budget: 4096`.
 
 Nothing else is downloaded automatically. Optional aliases live in
-`scripts/llamacpp_models.py` for manual prefetch only.
+`scripts/llamacpp_models.py` for manual prefetch only, including the FortBench
+MiniMax benchmark profiles.
 
 ## Install from a USB stick
 
@@ -32,9 +33,9 @@ The installer copies `llama.cpp/`, `opencode/`, and the model into the user
 profile (`~/.local/qwenstack` on Linux, `~/Library/Application Support/qwenstack`
 on macOS, `%USERPROFILE%\qwenstack` on Windows), registers a user-level service
 (`systemd --user`, `launchd`, or a logon-triggered `schtasks`), and writes the
-OpenCode config. OpenCode points at `http://127.0.0.1:8080/v1` inside the
-bundle, or at `http://127.0.0.1:8081/v1` when running from this repo's scripts
-(the local development box has another service bound to 8080).
+OpenCode config. OpenCode points at `http://127.0.0.1:8080/v1`, and the local
+launcher binds `0.0.0.0:8080` by default so the service is reachable on the LAN
+as well.
 
 ## Install from this repo (local development)
 

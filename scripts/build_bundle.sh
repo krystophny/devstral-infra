@@ -194,8 +194,8 @@ mkdir -p "${HOME}/.config/opencode"
 cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "llamacpp/qwen3.6-35b-a3b-q4",
-  "small_model": "llamacpp/qwen3.6-35b-a3b-q4",
+  "model": "llamacpp/qwen",
+  "small_model": "llamacpp/qwen",
   "agent": {"title": {"disable": true}},
   "share": "disabled",
   "autoupdate": false,
@@ -208,8 +208,8 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
       "name": "llama.cpp (Local)",
       "options": {"baseURL": "http://127.0.0.1:8080/v1"},
       "models": {
-        "qwen3.6-35b-a3b-q4": {
-          "name": "Qwen3.6 35B A3B Q4 (Local)",
+        "qwen": {
+          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
           "limit": {"context": 131072, "output": 16384},
           "reasoning": true,
           "tool_call": true,
@@ -307,8 +307,8 @@ mkdir -p "${HOME}/.config/opencode"
 cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "llamacpp/qwen3.6-35b-a3b-q4",
-  "small_model": "llamacpp/qwen3.6-35b-a3b-q4",
+  "model": "llamacpp/qwen",
+  "small_model": "llamacpp/qwen",
   "agent": {"title": {"disable": true}},
   "share": "disabled",
   "autoupdate": false,
@@ -321,8 +321,8 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
       "name": "llama.cpp (Local)",
       "options": {"baseURL": "http://127.0.0.1:8080/v1"},
       "models": {
-        "qwen3.6-35b-a3b-q4": {
-          "name": "Qwen3.6 35B A3B Q4 (Local)",
+        "qwen": {
+          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
           "limit": {"context": 131072, "output": 16384},
           "reasoning": true,
           "tool_call": true,
@@ -409,8 +409,8 @@ echo [5/5] writing OpenCode config to %OC_CFG%
 if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >  "%OC_CFG%" echo {
 >> "%OC_CFG%" echo   "$schema": "https://opencode.ai/config.json",
->> "%OC_CFG%" echo   "model": "llamacpp/qwen3.6-35b-a3b-q4",
->> "%OC_CFG%" echo   "small_model": "llamacpp/qwen3.6-35b-a3b-q4",
+>> "%OC_CFG%" echo   "model": "llamacpp/qwen",
+>> "%OC_CFG%" echo   "small_model": "llamacpp/qwen",
 >> "%OC_CFG%" echo   "agent": { "title": { "disable": true } },
 >> "%OC_CFG%" echo   "share": "disabled",
 >> "%OC_CFG%" echo   "autoupdate": false,
@@ -423,8 +423,8 @@ if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >> "%OC_CFG%" echo       "name": "llama.cpp (Local)",
 >> "%OC_CFG%" echo       "options": { "baseURL": "http://127.0.0.1:8080/v1" },
 >> "%OC_CFG%" echo       "models": {
->> "%OC_CFG%" echo         "qwen3.6-35b-a3b-q4": {
->> "%OC_CFG%" echo           "name": "Qwen3.6 35B A3B Q4 (Local)",
+>> "%OC_CFG%" echo         "qwen": {
+>> "%OC_CFG%" echo           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
 >> "%OC_CFG%" echo           "limit": { "context": 131072, "output": 16384 },
 >> "%OC_CFG%" echo           "reasoning": true,
 >> "%OC_CFG%" echo           "tool_call": true,
