@@ -187,7 +187,7 @@ test_opencode_config() {
   OPENCODE_CONFIG_PATH="${config_path}" \
   bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
 
-  if grep -q '"model": "llamacpp/qwen3.5-9b"' "${config_path}" && \
+  if grep -q '"model": "llamacpp/qwen3.6-35b-a3b-q4"' "${config_path}" && \
      grep -q '"disable": true' "${config_path}" && \
      grep -q '"permission": "allow"' "${config_path}" && \
      grep -q '"context": 131072' "${config_path}" && \

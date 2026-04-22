@@ -183,7 +183,7 @@ ci/
 - Default checkpoint interval: 4096 tokens
 - Default batch / ubatch: 2048 / 512
 - Thinking enabled by default
-- OpenCode config generator defaults to the fast local profile: `qwen3.5-9b` on `http://127.0.0.1:8081/v1`
+- OpenCode config generator defaults to the fast local profile: `qwen3.6-35b-a3b-q4` on `http://127.0.0.1:8081/v1` (CPU-MoE + GPU on non-Mac)
 - OpenCode default context: 65536, output limit: 8192
 - OpenCode config generator sets `permission: "allow"` for the local llama.cpp profile
 - OpenCode config generator sets `reasoning: true`, `tool_call: true`, and `thinking_budget: 4096`
