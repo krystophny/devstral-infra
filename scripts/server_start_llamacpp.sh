@@ -55,7 +55,7 @@ case "${INSTANCE}" in
     ;;
   fast)
     DEFAULT_PORT="8081"
-    DEFAULT_MODEL_ALIAS="qwen3.5-9b"
+    DEFAULT_MODEL_ALIAS="qwen3.6-35b-a3b-q4"
     DEFAULT_CONTEXT="131072"
     DEFAULT_THINKING="true"
     ;;
@@ -132,7 +132,7 @@ if [[ -z "${MODEL_PATH}" ]]; then
         qwen3.5-35b-a3b) HF_MODEL="lmstudio-community/Qwen3.5-35B-A3B-GGUF:Q8_0" ;;
         qwen3.5-122b-a10b) HF_MODEL="lmstudio-community/Qwen3.5-122B-A10B-GGUF:Q8_0" ;;
         qwen3.6-35b-a3b) HF_MODEL="unsloth/Qwen3.6-35B-A3B-GGUF:Q8_0" ;;
-        qwen3.6-35b-a3b-q4) HF_MODEL="bartowski/Qwen/Qwen3.6-35B-A3B-GGUF:Q4_K_M" ;;
+        qwen3.6-35b-a3b-q4) HF_MODEL="bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q4_K_M" ;;
         minimax-m2.5-q4) HF_MODEL="AesSedai/MiniMax-M2.5-GGUF:Q4_K_M" ;;
         gemma-4-31b-it) HF_MODEL="ggml-org/gemma-4-31B-it-GGUF:Q8_0" ;;
         gemma-4-26b-a4b-it) HF_MODEL="ggml-org/gemma-4-26B-A4B-it-GGUF:Q8_0" ;;
@@ -277,8 +277,21 @@ else
   fi
 fi
 
-# Optional tensor offload rule. Leave empty for max speed on Apple Silicon.
+# Tensor offload rule. Explicit -ot override takes precedence when set.
 MOE_OFFLOAD="${LLAMACPP_MOE_OFFLOAD:-}"
+
+# CPU-MoE: keep MoE expert FFNs on CPU while attention + shared weights stay on GPU.
+# Default to on for MoE aliases on non-Mac so large MoE models fit in limited VRAM.
+# Apple Silicon's unified memory keeps this off for max speed.
+CPU_MOE_DEFAULT="false"
+case "${MODEL_ALIAS}" in
+  *-a3b*|*-a4b*|*-a10b*|*-a12b*)
+    if [[ "$(detect_platform)" != "mac" ]]; then
+      CPU_MOE_DEFAULT="true"
+    fi
+    ;;
+esac
+CPU_MOE="${LLAMACPP_CPU_MOE:-${CPU_MOE_DEFAULT}}"
 
 if [[ "${PRINT_EXEC_START}" != "true" ]]; then
   echo "Starting llama.cpp server (instance: ${INSTANCE})..."
@@ -325,6 +338,9 @@ if [[ "${PRINT_EXEC_START}" != "true" ]]; then
   fi
   if [[ -n "${MOE_OFFLOAD}" ]]; then
     echo "- tensor offload rule: ${MOE_OFFLOAD}"
+  fi
+  if [[ "${CPU_MOE}" == "true" ]]; then
+    echo "- CPU-MoE: on (experts on CPU, attention on GPU)"
   fi
 fi
 
@@ -396,6 +412,10 @@ fi
 
 if [[ -n "${MOE_OFFLOAD}" ]]; then
   CMD+=(-ot "${MOE_OFFLOAD}")
+fi
+
+if [[ "${CPU_MOE}" == "true" ]]; then
+  CMD+=(--cpu-moe)
 fi
 
 if [[ "${ENABLE_THINKING}" == "true" ]]; then
