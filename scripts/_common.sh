@@ -60,6 +60,48 @@ detect_arch() {
 pid_command() { ps -p "$1" -o command= 2>/dev/null || true; }
 port_listener_pids() { lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true; }
 
+# Count physical CPU cores. Falls back to logical count if topology is hidden
+# (containers, WSL without /proc/cpuinfo detail, BSDs). Output is always >= 1.
+detect_physical_cores() {
+  local n=""
+  case "$(uname -s)" in
+    Darwin)
+      n="$(sysctl -n hw.physicalcpu 2>/dev/null || true)"
+      ;;
+    Linux)
+      if have lscpu; then
+        n="$(lscpu -p=core 2>/dev/null | awk -F, '!/^#/ && NF {print $1}' | sort -u | wc -l | tr -d ' ')"
+      fi
+      if [[ -z "${n}" || "${n}" == "0" ]] && [[ -r /proc/cpuinfo ]]; then
+        n="$(awk '/^core id/ {print $NF}' /proc/cpuinfo | sort -u | wc -l | tr -d ' ')"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if have wmic; then
+        n="$(wmic cpu get NumberOfCores /value 2>/dev/null | tr -d '\r' | awk -F= '/NumberOfCores=/{s+=$2} END{print s}')"
+      fi
+      ;;
+  esac
+  if [[ -z "${n}" || "${n}" == "0" ]]; then
+    n="$(nproc 2>/dev/null || echo 1)"
+  fi
+  [[ "${n}" -ge 1 ]] || n=1
+  echo "${n}"
+}
+
+# Reasonable --threads default: leave 2 physical cores for the host so the
+# desktop, Claude Code's HTTP client, and opencode's Bun HTTP pool don't
+# starve during --cpu-moe decode (which is the documented cause of stalls
+# that trip idle-timeout RSTs on concurrent unrelated TCP streams). Floor
+# at 2 for tiny hosts so we don't silently degrade into single-threaded.
+default_compute_threads() {
+  local phys reserve=2 threads
+  phys="$(detect_physical_cores)"
+  threads=$(( phys - reserve ))
+  [[ "${threads}" -lt 2 ]] && threads=2
+  echo "${threads}"
+}
+
 stop_pid() {
   local pid="$1" label="${2:-process}"
   kill -0 "${pid}" 2>/dev/null || return 0

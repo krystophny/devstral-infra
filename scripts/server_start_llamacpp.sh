@@ -19,6 +19,8 @@
 #   LLAMACPP_HOST         bind host (default 0.0.0.0)
 #   LLAMACPP_PARALLEL     concurrent slots (default 2)
 #   LLAMACPP_CPU_MOE      force on/off (default: on for non-Mac)
+#   LLAMACPP_THREADS      compute threads (default: physical_cores - 2, min 2; Mac: unset)
+#   LLAMACPP_THREADS_HTTP HTTP listener threads (default: 4 on CPU-MoE hosts; Mac: unset)
 #   LLAMACPP_DRY_RUN      true to print the command and exit
 #   LLAMACPP_SMOKE_TEST   false to skip the post-start /v1/chat/completions probe
 set -euo pipefail
@@ -76,6 +78,19 @@ PARALLEL="${LLAMACPP_PARALLEL:-2}"
 CPU_MOE_DEFAULT="false"
 [[ "${PLATFORM}" != "mac" ]] && CPU_MOE_DEFAULT="true"
 CPU_MOE="${LLAMACPP_CPU_MOE:-${CPU_MOE_DEFAULT}}"
+
+# Thread caps: only pin on CPU-MoE hosts. On Mac the experts live in unified
+# memory and Metal manages its own scheduler; no stalls have been observed,
+# so leave llama.cpp's defaults in place. On Linux/Windows --cpu-moe pegs
+# every core for memory-bandwidth-bound decode, which starves unrelated
+# userspace (Claude Code, opencode, DE) long enough for remote idle timeouts
+# to send RSTs. Reserving 2 physical cores eliminates the host-side stall.
+THREADS=""
+THREADS_HTTP=""
+if [[ "${PLATFORM}" != "mac" ]]; then
+  THREADS="${LLAMACPP_THREADS:-$(default_compute_threads)}"
+  THREADS_HTTP="${LLAMACPP_THREADS_HTTP:-4}"
+fi
 
 SERVED_ALIAS="${LLAMACPP_SERVED_ALIAS:-qwen}"
 INSTANCE="${LLAMACPP_INSTANCE:-}"
@@ -140,6 +155,9 @@ CMD+=("${SAMPLER_ARGS[@]}")
 if [[ "${CPU_MOE}" == "true" ]]; then
   CMD+=(--cpu-moe)
 fi
+if [[ -n "${THREADS}" ]]; then
+  CMD+=(--threads "${THREADS}" --threads-http "${THREADS_HTTP}")
+fi
 
 echo "starting llama.cpp server"
 echo "- binary:  ${LLAMA_SERVER}"
@@ -151,6 +169,9 @@ echo "- context: ${CONTEXT}"
 echo "- slots:   ${PARALLEL}"
 echo "- KV:      q8_0 / q8_0"
 echo "- cpu-moe: ${CPU_MOE}"
+if [[ -n "${THREADS}" ]]; then
+  echo "- threads: ${THREADS} compute / ${THREADS_HTTP} http"
+fi
 [[ -n "${INSTANCE}" ]] && echo "- instance: ${INSTANCE}"
 
 if [[ "${DRY_RUN}" == "true" ]]; then

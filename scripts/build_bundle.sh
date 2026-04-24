@@ -147,9 +147,14 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
 [[ -f "${MODEL}" ]] || { ls "${HERE}/../models"; echo "model not found"; exit 1; }
+PHYS="$(lscpu -p=core 2>/dev/null | awk -F, '!/^#/ && NF {print $1}' | sort -u | wc -l | tr -d ' ')"
+[[ "${PHYS}" =~ ^[0-9]+$ && "${PHYS}" -ge 1 ]] || PHYS="$(nproc 2>/dev/null || echo 4)"
+THREADS=$(( PHYS - 2 ))
+[[ "${THREADS}" -lt 2 ]] && THREADS=2
 exec "${HERE}/llama.cpp/llama-server" \
   -m "${MODEL}" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
   -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe \
+  --threads "${THREADS}" --threads-http 4 \
   --alias qwen --jinja --reasoning-format deepseek \
   --host 127.0.0.1 --port 8080
 EOF
@@ -171,6 +176,14 @@ find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "
 MODEL="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
 [[ -n "${MODEL}" ]] || { echo "model missing under ${DEST}/models"; exit 1; }
 
+# Reserve 2 physical cores for the host so Claude Code / opencode / the DE
+# aren't starved during --cpu-moe decode. Baked into the unit at install
+# time; re-run install.sh to re-detect after hardware changes.
+PHYS="$(lscpu -p=core 2>/dev/null | awk -F, '!/^#/ && NF {print $1}' | sort -u | wc -l | tr -d ' ')"
+[[ "${PHYS}" =~ ^[0-9]+$ && "${PHYS}" -ge 1 ]] || PHYS="$(nproc 2>/dev/null || echo 4)"
+THREADS=$(( PHYS - 2 ))
+[[ "${THREADS}" -lt 2 ]] && THREADS=2
+
 UNIT_DIR="${HOME}/.config/systemd/user"
 mkdir -p "${UNIT_DIR}"
 cat > "${UNIT_DIR}/qwenstack-llamacpp.service" <<UNIT
@@ -179,7 +192,7 @@ Description=qwenstack llama.cpp (Qwen3.6 35B A3B Q4)
 After=default.target
 
 [Service]
-ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
+ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads ${THREADS} --threads-http 4 --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
 Restart=on-failure
 RestartSec=5
 
@@ -389,7 +402,7 @@ build_windows_arc() {
 
   cat > "${t}/start.bat" <<'EOF'
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 set HERE=%~dp0
 set MODEL=%HERE%..\models\Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
 if not exist "%MODEL%" (
@@ -397,9 +410,22 @@ if not exist "%MODEL%" (
   dir "%HERE%..\models"
   exit /b 1
 )
+REM Reserve 2 physical cores for the host (Claude Code, opencode, DE) so
+REM --cpu-moe decode doesn't starve unrelated userspace and trip TCP idle
+REM timeouts. PowerShell reads physical core count; falls back to a
+REM logical-halved heuristic if PowerShell is absent.
+set THREADS=
+powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\qwenstack_threads.txt" 2>nul
+if exist "%TEMP%\qwenstack_threads.txt" (
+  set /p THREADS=<"%TEMP%\qwenstack_threads.txt"
+  del "%TEMP%\qwenstack_threads.txt"
+)
+if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
+if !THREADS! LSS 2 set THREADS=2
 "%HERE%llama.cpp\llama-server.exe" ^
   -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 ^
   -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe ^
+  --threads !THREADS! --threads-http 2 ^
   --alias qwen --jinja --reasoning-format deepseek ^
   --host 127.0.0.1 --port 8080
 EOF
@@ -409,6 +435,7 @@ EOF
 REM Install qwenstack into %USERPROFILE%\qwenstack and register a Startup
 REM shortcut so the server launches at every logon. No admin, no UAC:
 REM the Startup folder and %USERPROFILE% are always user-writable.
+REM Uses delayed expansion for !THREADS! at write time.
 setlocal EnableDelayedExpansion
 set HERE=%~dp0
 set BUNDLE_ROOT=%HERE%..
@@ -434,9 +461,18 @@ if not exist "%MODEL%" (
   exit /b 1
 )
 
-echo [3/6] writing %DEST%\run-llamacpp.bat
+echo [3/6] detecting physical cores and writing %DEST%\run-llamacpp.bat
+set THREADS=
+powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\qwenstack_threads.txt" 2>nul
+if exist "%TEMP%\qwenstack_threads.txt" (
+  set /p THREADS=<"%TEMP%\qwenstack_threads.txt"
+  del "%TEMP%\qwenstack_threads.txt"
+)
+if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
+if !THREADS! LSS 2 set THREADS=2
+echo     using --threads !THREADS! --threads-http 2
 > "%DEST%\run-llamacpp.bat" echo @echo off
->> "%DEST%\run-llamacpp.bat" echo start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
+>> "%DEST%\run-llamacpp.bat" echo start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
 
 echo [4/6] installing Startup shortcut at "%STARTUP%\qwenstack-llamacpp.bat"
 if not exist "%STARTUP%" mkdir "%STARTUP%"
@@ -495,7 +531,7 @@ echo     (env vars and PATH take effect in new cmd/powershell windows, not this 
 
 echo.
 echo Starting the server now (will also auto-start at every logon)...
-start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
+start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
 
 echo.
 echo OK. Wait ~30s for the model to load, then open a NEW command prompt
