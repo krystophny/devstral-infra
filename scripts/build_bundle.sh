@@ -189,6 +189,19 @@ UNIT
 
 systemctl --user daemon-reload
 systemctl --user enable --now qwenstack-llamacpp.service
+
+# Linger lets the user's systemd instance (and therefore the llama.cpp
+# service) start at boot and survive logout, without needing root. On
+# most Arch/Ubuntu polkit setups self-linger works for the current user
+# without an admin password; if it doesn't, fall back to login-only.
+if loginctl enable-linger "${USER}" >/dev/null 2>&1; then
+  echo "linger enabled: qwenstack-llamacpp starts at boot"
+else
+  echo "note: could not enable-linger (polkit denied); service will start"
+  echo "      at user login, not at boot. Run manually later with:"
+  echo "        sudo loginctl enable-linger ${USER}"
+fi
+
 sleep 2
 systemctl --user status --no-pager qwenstack-llamacpp.service | head -15
 
