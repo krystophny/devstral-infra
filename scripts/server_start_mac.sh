@@ -19,7 +19,7 @@ start_one() {
   LLAMACPP_PORT="${port}" \
   LLAMACPP_SERVED_ALIAS="${alias}" \
   LLAMACPP_MODEL_ALIAS="${model_alias}" \
-  LLAMACPP_CONTEXT="${LLAMACPP_CONTEXT:-262144}" \
+  LLAMACPP_CONTEXT="${LLAMACPP_CONTEXT:-524288}" \
   LLAMACPP_PARALLEL="${LLAMACPP_PARALLEL:-2}" \
   bash "${SCRIPT_DIR}/server_start_llamacpp.sh"
 }
