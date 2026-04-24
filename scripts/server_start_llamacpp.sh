@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Start one llama-server instance. Defaults match the blessed Qwen3.6 profile:
-#   Q8_0 KV cache, flash attention, 128K per-slot context across 2 parallel slots,
+#   Q8_0 KV cache, flash attention, 256K single-slot context,
 #   --cpu-moe on Linux/Windows, Metal (no --cpu-moe) on Mac, reasoning enabled.
 #
 # This script runs a single instance. For the Mac dual-instance deployment
 # (35B-A3B on 8080 + 27B on 8081) use scripts/server_start_mac.sh, which calls
-# this script twice with instance-specific ports, aliases, and file names.
+# this script twice with instance-specific ports, aliases, and file names and
+# passes LLAMACPP_PARALLEL=2 so each Mac instance keeps two slots.
 #
 # Env overrides:
 #   LLAMACPP_HOME         install dir (default ~/.local/llama.cpp)
@@ -14,10 +15,10 @@
 #   LLAMACPP_MODEL_ALIAS  alias from the model registry (default: blessed)
 #   LLAMACPP_INSTANCE     name suffix for pid/port/log files (default: empty -> .run/llamacpp.*)
 #   LLAMACPP_SERVED_ALIAS --alias served in /v1/models (default: qwen)
-#   LLAMACPP_CONTEXT      total context size across slots (default 262144, i.e. 128K x 2 slots)
+#   LLAMACPP_CONTEXT      total context size across slots (default 262144, full ctx for one slot)
 #   LLAMACPP_PORT         listen port (default 8080)
 #   LLAMACPP_HOST         bind host (default 0.0.0.0)
-#   LLAMACPP_PARALLEL     concurrent slots (default 2)
+#   LLAMACPP_PARALLEL     concurrent slots (default 1; Mac orchestrator passes 2)
 #   LLAMACPP_CPU_MOE      force on/off (default: on for non-Mac)
 #   LLAMACPP_THREADS      compute threads (default: physical_cores - 2, min 2; Mac: unset)
 #   LLAMACPP_THREADS_HTTP HTTP listener threads (default: 4 on CPU-MoE hosts; Mac: unset)
@@ -70,10 +71,14 @@ BATCH="${LLAMACPP_BATCH:-2048}"
 UBATCH="${LLAMACPP_UBATCH:-512}"
 NGL="${LLAMACPP_NGL:-99}"
 
-# Two concurrent slots per instance: on CPU-MoE hosts it lets the harness fan
-# out a main request plus one subagent without duplicating weights; on Mac
-# the dual-instance deployment gives each model its own pair of slots.
-PARALLEL="${LLAMACPP_PARALLEL:-2}"
+# One slot per instance by default. Halving the full 262144 context across two
+# slots made opencode auto-compaction fire at ~79K conversation tokens instead
+# of ~210K, which was the dominant annoyance; a single user rarely needs two
+# concurrent decode streams on the local box anyway, and when compaction does
+# trigger it runs in-line on the only slot — slower but always successful.
+# The Mac dual-instance orchestrator passes LLAMACPP_PARALLEL=2 explicitly to
+# keep each of its two models at two slots on the 256 GB unified-memory box.
+PARALLEL="${LLAMACPP_PARALLEL:-1}"
 
 CPU_MOE_DEFAULT="false"
 [[ "${PLATFORM}" != "mac" ]] && CPU_MOE_DEFAULT="true"

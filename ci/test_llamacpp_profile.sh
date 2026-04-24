@@ -59,11 +59,11 @@ EOF
         "${output}" == *"--top-p 0.95"* && \
         "${output}" == *"--top-k 20"* && \
         "${output}" == *"--port 18080"* && \
-        "${output}" == *"-np 2"* && \
+        "${output}" == *"-np 1"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
         "${cpu_moe_ok}" == "1" && \
         "${threads_ok}" == "1" ]]; then
-    echo "PASS: launcher emits the blessed single-instance profile (-np 2)"
+    echo "PASS: launcher emits the blessed single-instance profile (-np 1)"
   else
     echo "FAIL: launcher profile mismatch (cpu_moe_ok=${cpu_moe_ok} threads_ok=${threads_ok})"
     echo "${output}"
@@ -144,7 +144,7 @@ EOF
   if [[ "${output}" == *"--alias qwen-27b"* && \
         "${output}" == *"--port 18081"* && \
         "${output}" == *"- instance: 27b"* && \
-        "${output}" == *"-np 2"* ]]; then
+        "${output}" == *"-np 1"* ]]; then
     echo "PASS: instance suffix and served alias take effect"
   else
     echo "FAIL: instance override did not propagate"
@@ -196,7 +196,7 @@ test_opencode_config() {
     grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)' "${config_path}" || platform_ok=0
   else
     grep -q '"model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
-    grep -q '"context": 131072' "${config_path}" || platform_ok=0
+    grep -q '"context": 262144' "${config_path}" || platform_ok=0
     grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
     grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local)' "${config_path}" || platform_ok=0
   fi
