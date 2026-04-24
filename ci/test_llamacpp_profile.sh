@@ -39,7 +39,7 @@ EOF
     [[ "${output}" != *"--cpu-moe"* ]] || moe_ok=0
   else
     # Non-Mac: partial MoE offload tuned for 16 GB CUDA + TTS/STT neighbours.
-    [[ "${output}" == *"--n-cpu-moe 30"* ]] || moe_ok=0
+    [[ "${output}" == *"--n-cpu-moe 35"* ]] || moe_ok=0
     # The legacy --cpu-moe flag must not be emitted anymore.
     [[ "${output}" != *"--cpu-moe "* ]] || moe_ok=0
   fi
@@ -69,7 +69,7 @@ EOF
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
         "${moe_ok}" == "1" && \
         "${threads_ok}" == "1" ]]; then
-    echo "PASS: launcher emits the blessed single-instance profile (-np 1, -ub 1024, --n-cpu-moe 30)"
+    echo "PASS: launcher emits the blessed single-instance profile (-np 1, -ub 1024, --n-cpu-moe 35)"
   else
     echo "FAIL: launcher profile mismatch (moe_ok=${moe_ok} threads_ok=${threads_ok})"
     echo "${output}"
@@ -317,10 +317,10 @@ EOF
     && grep -qx -- '--port' "${stamp}" \
     && grep -qx -- '18084' "${stamp}" \
     && grep -qx -- '--n-cpu-moe' "${stamp}" \
-    && grep -qx -- '30' "${stamp}" \
+    && grep -qx -- '35' "${stamp}" \
     && grep -qx -- '-ub' "${stamp}" \
     && grep -qx -- '1024' "${stamp}"; then
-    echo "PASS: exec-mode argv has -np 1, -ub 1024, --n-cpu-moe 30"
+    echo "PASS: exec-mode argv has -np 1, -ub 1024, --n-cpu-moe 35"
   else
     echo "FAIL: exec-mode argv did not include expected flags"
     cat "${stamp}"
@@ -356,7 +356,7 @@ EOF
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
   )"
 
-  if [[ "${output}" == *"--n-cpu-moe 99"* && "${output}" != *"--n-cpu-moe 30"* ]]; then
+  if [[ "${output}" == *"--n-cpu-moe 99"* && "${output}" != *"--n-cpu-moe 35"* ]]; then
     echo "PASS: LLAMACPP_CPU_MOE=true pins --n-cpu-moe 99 (all experts on CPU)"
   else
     echo "FAIL: legacy CPU_MOE fallback did not emit --n-cpu-moe 99"

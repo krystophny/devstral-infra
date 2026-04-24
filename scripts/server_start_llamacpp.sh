@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Start one llama-server instance. Defaults match the blessed Qwen3.6 profile:
 #   Q8_0 KV cache, flash attention, 256K single-slot context,
-#   partial MoE offload (--n-cpu-moe 30, -ub 1024) tuned for a 16 GB CUDA
-#   GPU coexisting with whisper + piper + future TTS neighbours on
-#   Linux/Windows; Metal (no MoE split) on Mac; reasoning enabled.
+#   partial MoE offload (--n-cpu-moe 35, -ub 1024) tuned for a 16 GB CUDA
+#   GPU coexisting with whisper-server (~1 GB) + Qwen3-TTS (~4.4 GB at synth
+#   peak) on Linux/Windows; Metal (no MoE split) on Mac; reasoning enabled.
 #
 # This script runs a single instance. For the Mac dual-instance deployment
 # (35B-A3B on 8080 + 27B on 8081) use scripts/server_start_mac.sh, which calls
@@ -22,7 +22,8 @@
 #   LLAMACPP_HOST         bind host (default 0.0.0.0)
 #   LLAMACPP_PARALLEL     concurrent slots (default 1; Mac orchestrator passes 2)
 #   LLAMACPP_N_CPU_MOE    number of MoE expert layers to keep on CPU
-#                         (default 30 on non-Mac -> 10/40 layers on GPU; empty on Mac)
+#                         (default 35 on non-Mac -> 5/40 expert layers on GPU;
+#                         empty on Mac)
 #   LLAMACPP_CPU_MOE      legacy on/off; true forces --n-cpu-moe 99 (all on CPU);
 #                         only takes effect when LLAMACPP_N_CPU_MOE is unset.
 #   LLAMACPP_UBATCH       physical batch (default 1024 on non-Mac; empty on Mac)
@@ -97,15 +98,17 @@ NGL="${LLAMACPP_NGL:-99}"
 PARALLEL="${LLAMACPP_PARALLEL:-1}"
 
 # Partial MoE offload: on a 16 GB CUDA GPU coexisting with whisper-server
-# (~1 GB resident) and a future qwen3-tts neighbour, --n-cpu-moe 30 puts
-# expert layers 0..29 on CPU and 30..39 on GPU. At c=262144 -ub 1024 total
-# VRAM is ~11.0 GB, which leaves ~4 GB for the other services and ~1 GB OS
-# overhead. Bench on this hardware (RTX 5060 Ti) measured 2.15x prefill and
-# 1.20x decode vs the all-CPU-moe baseline — see commit history for numbers.
+# (~0.9 GB resident) and Qwen3-TTS (~4.4 GB at synth peak), --n-cpu-moe 35
+# puts expert layers 0..34 on CPU and 35..39 on GPU. At c=262144 -ub 1024
+# llama holds ~8.7 GB VRAM; with whisper + TTS at synth peak the full stack
+# lands at ~14.6 GB / 16 GB, leaving ~1.3 GB headroom. Bench on RTX 5060 Ti
+# (Qwen3.6-35B-A3B Q4_K_M) measured 1.9x prefill and 1.12x decode vs the old
+# all-CPU-moe baseline — slightly slower than the earlier --n-cpu-moe 30
+# default but leaves room for TTS to load without OOM. See commit history.
 # Mac keeps everything in unified memory; no split. Setting LLAMACPP_CPU_MOE=
 # true forces the old all-CPU-moe path (--n-cpu-moe 99) for emergencies.
 N_CPU_MOE_DEFAULT=""
-[[ "${PLATFORM}" != "mac" ]] && N_CPU_MOE_DEFAULT="30"
+[[ "${PLATFORM}" != "mac" ]] && N_CPU_MOE_DEFAULT="35"
 N_CPU_MOE="${LLAMACPP_N_CPU_MOE:-${N_CPU_MOE_DEFAULT}}"
 if [[ -z "${LLAMACPP_N_CPU_MOE:-}" && "${LLAMACPP_CPU_MOE:-false}" == "true" ]]; then
   N_CPU_MOE="99"
