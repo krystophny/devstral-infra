@@ -105,6 +105,7 @@ test_opencode_config() {
 
   HOME="${home_dir}" \
   OPENCODE_CONFIG_PATH="${config_path}" \
+  OPENCODE_SKIP_PRIVACY_ENV=true \
   bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
 
   local common_ok=1
@@ -119,7 +120,14 @@ test_opencode_config() {
   grep -q '"min_p": 0.0' "${config_path}" || common_ok=0
   grep -q '"presence_penalty": 0.0' "${config_path}" || common_ok=0
   grep -q '"repeat_penalty": 1.0' "${config_path}" || common_ok=0
-  grep -q '"disabled_providers": \["exa", "openai", "anthropic"' "${config_path}" || common_ok=0
+  grep -q '"websearch": false' "${config_path}" || common_ok=0
+  grep -q '"openTelemetry": false' "${config_path}" || common_ok=0
+  grep -q '"share": "disabled"' "${config_path}" || common_ok=0
+  grep -q '"autoupdate": false' "${config_path}" || common_ok=0
+  grep -q '"opencode"' "${config_path}" || common_ok=0
+  grep -q '"llmgateway"' "${config_path}" || common_ok=0
+  grep -q '"github-copilot"' "${config_path}" || common_ok=0
+  grep -q '"disabled_providers": \["exa",' "${config_path}" || common_ok=0
 
   local platform_ok=1
   if [[ "$(uname -s)" == "Darwin" ]]; then

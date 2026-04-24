@@ -139,6 +139,8 @@ build_linux_cuda() {
   fetch_archive "${oc_url}" "${t}/opencode"
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
 
+  install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
+
   cat > "${t}/start.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -200,8 +202,9 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
   "share": "disabled",
   "autoupdate": false,
   "permission": "allow",
+  "tools": {"websearch": false},
   "experimental": {"openTelemetry": false},
-  "disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
+  "disabled_providers": ["exa", "opencode", "llmgateway", "github-copilot", "copilot", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",
@@ -221,7 +224,16 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 }
 JSON
 
-echo "OK. Run: ${DEST}/opencode/opencode"
+bash "${HERE}/opencode_privacy.sh"
+
+mkdir -p "${HOME}/.local/bin"
+ln -sf "${DEST}/opencode/opencode" "${HOME}/.local/bin/opencode"
+case ":${PATH}:" in
+  *":${HOME}/.local/bin:"*) ;;
+  *) echo "note: add ~/.local/bin to PATH (export PATH=\"\${HOME}/.local/bin:\${PATH}\") to run 'opencode' directly." ;;
+esac
+
+echo "OK. New shell, then: opencode   (or: ${DEST}/opencode/opencode)"
 EOF
   chmod +x "${t}/install.sh"
 }
@@ -237,6 +249,8 @@ build_mac_m1() {
   echo "mac-m1: opencode ${oc_tag}"
   fetch_archive "${oc_url}" "${t}/opencode"
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
+
+  install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
 
   cat > "${t}/start.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -313,8 +327,9 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
   "share": "disabled",
   "autoupdate": false,
   "permission": "allow",
+  "tools": {"websearch": false},
   "experimental": {"openTelemetry": false},
-  "disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
+  "disabled_providers": ["exa", "opencode", "llmgateway", "github-copilot", "copilot", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",
@@ -334,7 +349,16 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 }
 JSON
 
-echo "OK. Run: ${DEST}/opencode/opencode"
+bash "${HERE}/opencode_privacy.sh"
+
+mkdir -p "${HOME}/.local/bin"
+ln -sf "${DEST}/opencode/opencode" "${HOME}/.local/bin/opencode"
+case ":${PATH}:" in
+  *":${HOME}/.local/bin:"*) ;;
+  *) echo "note: add ~/.local/bin to PATH (export PATH=\"\${HOME}/.local/bin:\${PATH}\") to run 'opencode' directly." ;;
+esac
+
+echo "OK. New shell, then: opencode   (or: ${DEST}/opencode/opencode)"
 EOF
   chmod +x "${t}/install.sh"
 }
@@ -380,13 +404,13 @@ set STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
 set OC_CFG_DIR=%USERPROFILE%\.config\opencode
 set OC_CFG=%OC_CFG_DIR%\opencode.json
 
-echo [1/5] creating %DEST%
+echo [1/6] creating %DEST%
 if not exist "%DEST%" mkdir "%DEST%"
 if not exist "%DEST%\llama.cpp" mkdir "%DEST%\llama.cpp"
 if not exist "%DEST%\opencode" mkdir "%DEST%\opencode"
 if not exist "%DEST%\models" mkdir "%DEST%\models"
 
-echo [2/5] copying binaries and model (this takes a while for the GGUF)...
+echo [2/6] copying binaries and model (this takes a while for the GGUF)...
 xcopy /E /Y /I /Q "%HERE%llama.cpp\*" "%DEST%\llama.cpp\" >nul
 xcopy /E /Y /I /Q "%HERE%opencode\*" "%DEST%\opencode\" >nul
 xcopy /Y /I /Q "%BUNDLE_ROOT%\models\*.gguf" "%DEST%\models\" >nul
@@ -397,15 +421,15 @@ if not exist "%MODEL%" (
   exit /b 1
 )
 
-echo [3/5] writing %DEST%\run-llamacpp.bat
+echo [3/6] writing %DEST%\run-llamacpp.bat
 > "%DEST%\run-llamacpp.bat" echo @echo off
 >> "%DEST%\run-llamacpp.bat" echo start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
 
-echo [4/5] installing Startup shortcut at "%STARTUP%\qwenstack-llamacpp.bat"
+echo [4/6] installing Startup shortcut at "%STARTUP%\qwenstack-llamacpp.bat"
 if not exist "%STARTUP%" mkdir "%STARTUP%"
 copy /Y "%DEST%\run-llamacpp.bat" "%STARTUP%\qwenstack-llamacpp.bat" >nul
 
-echo [5/5] writing OpenCode config to %OC_CFG%
+echo [5/6] writing OpenCode config to %OC_CFG%
 if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >  "%OC_CFG%" echo {
 >> "%OC_CFG%" echo   "$schema": "https://opencode.ai/config.json",
@@ -415,8 +439,9 @@ if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >> "%OC_CFG%" echo   "share": "disabled",
 >> "%OC_CFG%" echo   "autoupdate": false,
 >> "%OC_CFG%" echo   "permission": "allow",
+>> "%OC_CFG%" echo   "tools": { "websearch": false },
 >> "%OC_CFG%" echo   "experimental": { "openTelemetry": false },
->> "%OC_CFG%" echo   "disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
+>> "%OC_CFG%" echo   "disabled_providers": ["exa", "opencode", "llmgateway", "github-copilot", "copilot", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"],
 >> "%OC_CFG%" echo   "provider": {
 >> "%OC_CFG%" echo     "llamacpp": {
 >> "%OC_CFG%" echo       "npm": "@ai-sdk/openai-compatible",
@@ -435,12 +460,34 @@ if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >> "%OC_CFG%" echo   }
 >> "%OC_CFG%" echo }
 
+echo [6/6] pinning opencode privacy env vars in HKCU\Environment (no admin)
+setx OPENCODE_DISABLE_AUTOUPDATE 1 >nul
+setx OPENCODE_DISABLE_SHARE 1 >nul
+setx OPENCODE_DISABLE_MODELS_FETCH 1 >nul
+setx OPENCODE_DISABLE_LSP_DOWNLOAD 1 >nul
+setx OPENCODE_DISABLE_DEFAULT_PLUGINS 1 >nul
+setx OPENCODE_DISABLE_EMBEDDED_WEB_UI 1 >nul
+
+REM Idempotent prepend of the opencode dir to user PATH via PowerShell
+REM (reads HKCU\Environment directly so successive runs don't duplicate).
+set OC_BIN_DIR=%DEST%\opencode
+powershell -NoProfile -Command ^
+  "$u = [Environment]::GetEnvironmentVariable('Path','User');" ^
+  "$d = '%OC_BIN_DIR%';" ^
+  "if ($null -eq $u) { $u = '' }" ^
+  "$parts = $u.Split(';') | Where-Object { $_ -and $_ -ne $d };" ^
+  "$new = (@($d) + $parts) -join ';';" ^
+  "[Environment]::SetEnvironmentVariable('Path', $new, 'User')"
+echo     (env vars and PATH take effect in new cmd/powershell windows, not this one)
+
 echo.
 echo Starting the server now (will also auto-start at every logon)...
 start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
 
 echo.
-echo OK. Wait ~30s for the model to load, then run: %DEST%\opencode\opencode.exe
+echo OK. Wait ~30s for the model to load, then open a NEW command prompt
+echo so the OPENCODE_DISABLE_* env vars and PATH are picked up, and run:
+echo     opencode
 echo (to stop the server: open Task Manager and end llama-server.exe)
 EOF
 }
