@@ -110,7 +110,6 @@ test_opencode_config() {
   local common_ok=1
   grep -q '"disable": true' "${config_path}" || common_ok=0
   grep -q '"permission": "allow"' "${config_path}" || common_ok=0
-  grep -q '"context": 131072' "${config_path}" || common_ok=0
   grep -q '"output": 16384' "${config_path}" || common_ok=0
   grep -q '"reasoning": true' "${config_path}" || common_ok=0
   grep -q '"thinking_budget": 4096' "${config_path}" || common_ok=0
@@ -126,12 +125,14 @@ test_opencode_config() {
   if [[ "$(uname -s)" == "Darwin" ]]; then
     grep -q '"model": "llamacpp/qwen-27b"' "${config_path}" || platform_ok=0
     grep -q '"small_model": "llamacpp-moe/qwen-35b-a3b"' "${config_path}" || platform_ok=0
+    grep -q '"context": 262144' "${config_path}" || platform_ok=0
     grep -q 'http://127.0.0.1:8081/v1' "${config_path}" || platform_ok=0
     grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
     grep -q 'Qwen3.6 27B Q4 + KV-Q8 (Local dense)' "${config_path}" || platform_ok=0
     grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)' "${config_path}" || platform_ok=0
   else
     grep -q '"model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
+    grep -q '"context": 131072' "${config_path}" || platform_ok=0
     grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
     grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local)' "${config_path}" || platform_ok=0
   fi

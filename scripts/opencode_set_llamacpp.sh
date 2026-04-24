@@ -17,7 +17,15 @@ source "${SCRIPT_DIR}/_common.sh"
 
 PLATFORM="$(detect_platform)"
 HOST="${LLAMACPP_HOST:-127.0.0.1}"
-CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-131072}"
+# Per-slot context: Mac dual-instance launcher runs -c 524288 -np 2 (262144
+# per slot = the model's native n_ctx_train). Non-Mac single-instance keeps
+# -c 262144 -np 2 (131072 per slot).
+if [[ "${PLATFORM}" == "mac" ]]; then
+  CONTEXT_SIZE_DEFAULT=262144
+else
+  CONTEXT_SIZE_DEFAULT=131072
+fi
+CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-${CONTEXT_SIZE_DEFAULT}}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-16384}"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"

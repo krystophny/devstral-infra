@@ -52,11 +52,20 @@ bootout_if_loaded() {
     echo "unloading ${label}"
     launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || launchctl unload "${plist}" 2>/dev/null || true
   fi
-  [[ -f "${plist}" ]] && rm -f "${plist}"
+  rm -f "${plist}"
 }
 
 # Legacy single-instance agent -> remove.
 bootout_if_loaded com.devstral.llamacpp-local
+
+wait_gone() {
+  local label="$1" deadline=$(( $(date +%s) + 10 ))
+  while launchctl list | awk '{print $3}' | grep -qx "${label}"; do
+    [[ $(date +%s) -ge ${deadline} ]] && return 1
+    sleep 1
+  done
+  return 0
+}
 
 write_plist() {
   local label="$1" port="$2" alias="$3" model="$4" instance="$5"
@@ -75,7 +84,7 @@ write_plist() {
   <array>
     <string>${SERVER_BIN}</string>
     <string>-m</string><string>${model}</string>
-    <string>-c</string><string>262144</string>
+    <string>-c</string><string>524288</string>
     <string>-b</string><string>2048</string>
     <string>-ub</string><string>512</string>
     <string>-ngl</string><string>99</string>
@@ -107,6 +116,7 @@ write_plist() {
 </plist>
 XML
   launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
+  wait_gone "${label}" || die "failed to unload existing ${label}"
   launchctl bootstrap "gui/$(id -u)" "${plist}"
   echo "loaded ${label} (port ${port}, alias ${alias})"
 }
