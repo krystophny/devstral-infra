@@ -23,6 +23,10 @@
 #   LLAMACPP_THREADS      compute threads (default: physical_cores - 2, min 2; Mac: unset)
 #   LLAMACPP_THREADS_HTTP HTTP listener threads (default: 4 on CPU-MoE hosts; Mac: unset)
 #   LLAMACPP_DRY_RUN      true to print the command and exit
+#   LLAMACPP_EXEC         true to exec llama-server in the foreground (for
+#                         systemd/launchd ExecStart); skips nohup, pid files,
+#                         ready polling, and the smoke test — the supervisor
+#                         owns the PID and restart policy.
 #   LLAMACPP_SMOKE_TEST   false to skip the post-start /v1/chat/completions probe
 set -euo pipefail
 
@@ -183,6 +187,13 @@ if [[ "${DRY_RUN}" == "true" ]]; then
   printf '%q ' "${CMD[@]}"
   echo
   exit 0
+fi
+
+# Foreground mode for systemd/launchd ExecStart: replace the shell with
+# llama-server so the supervisor tracks the real process, captures stdout/
+# stderr through its own logging, and applies Restart=on-failure directly.
+if [[ "${LLAMACPP_EXEC:-false}" == "true" ]]; then
+  exec "${CMD[@]}"
 fi
 
 nohup "${CMD[@]}" >"${LOG_FILE}" 2>&1 &

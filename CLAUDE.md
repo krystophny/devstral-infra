@@ -27,6 +27,14 @@ service on the LAN.
 No root or admin is required anywhere. The only automatic downloads are the two
 GGUFs (one on non-Mac) and the two binaries.
 
+The Linux service is installed by `scripts/install_linux_systemd.sh`: it writes
+`~/.config/systemd/user/devstral-llamacpp.service`, whose ExecStart invokes
+`server_start_llamacpp.sh` with `LLAMACPP_EXEC=true` so llama-server runs in
+the foreground under systemd. The installer runs `loginctl enable-linger`
+(no sudo in the common case) so the service survives logout and starts at
+boot. Re-run the installer any time the launcher changes — the unit only
+references the launcher path, so nothing else has to be regenerated.
+
 On Linux with an NVIDIA GPU and the CUDA toolkit present (`nvcc`, `cmake`,
 `ninja`, `git` on PATH), `setup_llamacpp.sh` builds llama.cpp from source at
 the matching release tag with `-DGGML_CUDA=ON` instead of downloading the
@@ -70,10 +78,14 @@ scripts/
   setup_llamacpp.sh             prebuilt download (default), or CUDA source build on Linux+NVIDIA
   opencode_privacy.sh           pin OPENCODE_DISABLE_* env vars in ~/.profile + environment.d (idempotent)
   llamacpp_models.py            default + optional model aliases; prefetch/resolve
-  server_start_llamacpp.sh      single-instance launcher (LAN-capable by default)
+  server_start_llamacpp.sh      single-instance launcher; LLAMACPP_EXEC=true
+                                replaces the shell with llama-server for systemd
   server_stop_llamacpp.sh
   server_start_mac.sh           macOS dual-instance orchestrator (35B :8080 + 27B :8081)
   server_stop_mac.sh
+  install_linux_systemd.sh      write & enable ~/.config/systemd/user/devstral-
+                                llamacpp.service; enable-linger for boot autostart
+  install_mac_launchagents.sh   macOS launchd user agents for the dual-instance stack
   opencode_install.sh           curl|bash (online) or OPENCODE_OFFLINE_ARCHIVE (USB)
   opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json (dual on Mac, single on PC)
   build_bundle.sh               build USB-ready per-OS trees with embedded installers
