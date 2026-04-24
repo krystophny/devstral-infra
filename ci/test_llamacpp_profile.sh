@@ -158,10 +158,68 @@ test_models_default_alias() {
   fi
 }
 
+test_setup_backend_selection() {
+  echo "TEST: setup_llamacpp.sh backend selection"
+  local home_dir="${TMPDIR}/home-setup"
+  local fake_bin="${TMPDIR}/fake-bin"
+  mkdir -p "${home_dir}/.local/llama.cpp" "${fake_bin}"
+
+  # Fake `curl` so the script never hits the network. Emits a minimal release
+  # payload so only the dispatch branching is exercised.
+  cat > "${fake_bin}/curl" <<'EOF'
+#!/usr/bin/env bash
+echo '{"tag_name":"bTEST","assets":[]}'
+EOF
+  chmod +x "${fake_bin}/curl"
+
+  run_setup() {
+    local var="$1"
+    env -i \
+      HOME="${home_dir}" \
+      PATH="${fake_bin}:/usr/bin:/bin" \
+      LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
+      LLAMACPP_BACKEND="${var}" \
+      bash "${REPO_ROOT}/scripts/setup_llamacpp.sh" 2>&1 || true
+  }
+
+  local out_prebuilt out_cuda out_bogus
+  out_prebuilt="$(run_setup prebuilt)"
+  if [[ "${out_prebuilt}" != *"backend: prebuilt"* ]]; then
+    echo "FAIL: explicit LLAMACPP_BACKEND=prebuilt not honored"
+    echo "${out_prebuilt}"
+    return 1
+  fi
+
+  out_cuda="$(run_setup cuda-source)"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ "${out_cuda}" != *"only supported on Linux"* ]]; then
+      echo "FAIL: cuda-source should refuse non-Linux platforms"
+      echo "${out_cuda}"
+      return 1
+    fi
+  else
+    if [[ "${out_cuda}" != *"backend: cuda-source"* ]]; then
+      echo "FAIL: explicit LLAMACPP_BACKEND=cuda-source not honored on Linux"
+      echo "${out_cuda}"
+      return 1
+    fi
+  fi
+
+  out_bogus="$(run_setup nope)"
+  if [[ "${out_bogus}" != *"unknown LLAMACPP_BACKEND"* ]]; then
+    echo "FAIL: invalid backend value not rejected"
+    echo "${out_bogus}"
+    return 1
+  fi
+
+  echo "PASS: setup backend dispatch accepts prebuilt/cuda-source, rejects bogus"
+}
+
 test_server_start_dry_run || FAILED=$((FAILED + 1))
 test_server_start_instance_overrides || FAILED=$((FAILED + 1))
 test_opencode_config || FAILED=$((FAILED + 1))
 test_models_default_alias || FAILED=$((FAILED + 1))
+test_setup_backend_selection || FAILED=$((FAILED + 1))
 
 if [[ "${FAILED}" -gt 0 ]]; then
   echo "${FAILED} test(s) failed"

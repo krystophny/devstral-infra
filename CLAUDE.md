@@ -27,12 +27,21 @@ service on the LAN.
 No root or admin is required anywhere. The only automatic downloads are the two
 GGUFs (one on non-Mac) and the two binaries.
 
+On Linux with an NVIDIA GPU and the CUDA toolkit present (`nvcc`, `cmake`,
+`ninja`, `git` on PATH), `setup_llamacpp.sh` builds llama.cpp from source at
+the matching release tag with `-DGGML_CUDA=ON` instead of downloading the
+Vulkan release. Rationale: upstream ggml-org only ships CUDA binaries for
+Windows, and the portable Vulkan release underperforms on NVIDIA hardware
+badly enough that the inter-token stalls trigger `ECONNRESET` in the opencode
+client mid-stream. Set `LLAMACPP_BACKEND=prebuilt` to force the Vulkan path
+on a box that has the toolkit but shouldn't build from source.
+
 ## Repo map
 
 ```
 scripts/
   _common.sh                    shared bash helpers (paths, platform detect, stop_pid)
-  setup_llamacpp.sh             fetch latest upstream release, unpack to ~/.local/llama.cpp
+  setup_llamacpp.sh             prebuilt download (default), or CUDA source build on Linux+NVIDIA
   llamacpp_models.py            default + optional model aliases; prefetch/resolve
   server_start_llamacpp.sh      single-instance launcher (LAN-capable by default)
   server_stop_llamacpp.sh
