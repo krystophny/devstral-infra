@@ -104,6 +104,18 @@ Plus `--cpu-moe` on Linux and Windows (the local 16 GB VRAM box cannot hold the
 Q4_K_M experts on GPU). On Mac unified memory makes `--cpu-moe` counterproductive,
 so Metal holds everything.
 
+Linux and Windows also pass `--threads <physical_cores - 2> --threads-http 4`
+(clamped to a minimum of 2). Rationale: `--cpu-moe` decode on Qwen3-Next is
+memory-bandwidth-bound and by default llama-server grabs every core. That
+starves the rest of userspace — Claude Code's HTTP/2 keepalive and opencode's
+Bun HTTP pool both miss their scheduling windows long enough for the server
+side to send idle-timeout RSTs. Reserving 2 physical cores for the host
+eliminates the host-side stall and is why a local inference workload was
+breaking unrelated TCP streams on the same box. Mac is untouched (Metal
+schedules on its own, user sees no stalls in unified-memory mode); defaults
+can be overridden per invocation via `LLAMACPP_THREADS` /
+`LLAMACPP_THREADS_HTTP`.
+
 Default deployment per platform:
 
 | Host            | Instances                        | `--alias`                    | `-np` | `-c`   | Per-slot ctx |

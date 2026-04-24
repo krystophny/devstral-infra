@@ -39,6 +39,16 @@ EOF
     [[ "${output}" == *"--cpu-moe"* ]] || cpu_moe_ok=0
   fi
 
+  # Thread caps: only pinned on non-Mac. On Mac the flags must be absent.
+  local threads_ok=1
+  if [[ "${platform}" == "Darwin" ]]; then
+    [[ "${output}" != *"--threads "* ]] || threads_ok=0
+    [[ "${output}" != *"--threads-http "* ]] || threads_ok=0
+  else
+    [[ "${output}" == *"--threads "* ]] || threads_ok=0
+    [[ "${output}" == *"--threads-http 4"* ]] || threads_ok=0
+  fi
+
   if [[ "${output}" == *"-c 262144"* && \
         "${output}" == *"--cache-type-k q8_0"* && \
         "${output}" == *"--cache-type-v q8_0"* && \
@@ -51,12 +61,58 @@ EOF
         "${output}" == *"--port 18080"* && \
         "${output}" == *"-np 2"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
-        "${cpu_moe_ok}" == "1" ]]; then
+        "${cpu_moe_ok}" == "1" && \
+        "${threads_ok}" == "1" ]]; then
     echo "PASS: launcher emits the blessed single-instance profile (-np 2)"
   else
-    echo "FAIL: launcher profile mismatch"
+    echo "FAIL: launcher profile mismatch (cpu_moe_ok=${cpu_moe_ok} threads_ok=${threads_ok})"
     echo "${output}"
     return 1
+  fi
+}
+
+test_server_start_thread_override() {
+  echo "TEST: launcher honors LLAMACPP_THREADS override"
+  local home_dir="${TMPDIR}/home-threads"
+  local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  mkdir -p "${home_dir}/.local/llama.cpp"
+  cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${home_dir}/.local/llama.cpp/llama-server"
+  : > "${model_path}"
+
+  local output
+  output="$(
+    HOME="${home_dir}" \
+    LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
+    LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_PORT=18082 \
+    LLAMACPP_THREADS=7 \
+    LLAMACPP_THREADS_HTTP=3 \
+    LLAMACPP_SMOKE_TEST=false \
+    LLAMACPP_DRY_RUN=true \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # Mac still honors explicit overrides — user opts in, launcher emits.
+    if [[ "${output}" == *"--threads 7"* && "${output}" == *"--threads-http 3"* ]]; then
+      echo "PASS: explicit thread overrides emitted on Mac when requested"
+    else
+      echo "FAIL: Mac did not honor explicit LLAMACPP_THREADS override"
+      echo "${output}"
+      return 1
+    fi
+  else
+    if [[ "${output}" == *"--threads 7"* && "${output}" == *"--threads-http 3"* ]]; then
+      echo "PASS: launcher honors LLAMACPP_THREADS / LLAMACPP_THREADS_HTTP"
+    else
+      echo "FAIL: thread overrides not in emitted command"
+      echo "${output}"
+      return 1
+    fi
   fi
 }
 
@@ -225,6 +281,7 @@ EOF
 
 test_server_start_dry_run || FAILED=$((FAILED + 1))
 test_server_start_instance_overrides || FAILED=$((FAILED + 1))
+test_server_start_thread_override || FAILED=$((FAILED + 1))
 test_opencode_config || FAILED=$((FAILED + 1))
 test_models_default_alias || FAILED=$((FAILED + 1))
 test_setup_backend_selection || FAILED=$((FAILED + 1))
