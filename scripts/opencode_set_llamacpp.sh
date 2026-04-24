@@ -5,10 +5,11 @@
 #   * qwen-27b      (default, dense Qwen3.6 27B Q4)  -> http://127.0.0.1:8081/v1
 #   * qwen-35b-a3b  (small_model, MoE)               -> http://127.0.0.1:8080/v1
 # Both use the Qwen "precise coding + thinking" sampler (temp 0.6, top_p 0.95,
-# top_k 20, min_p 0, presence 0, repeat_penalty 1.0) and 131072-token per-slot
-# context to match the launcher's -c 262144 -np 2.
+# top_k 20, min_p 0, presence 0, repeat_penalty 1.0) and 262144-token per-slot
+# context (Mac runs -c 524288 -np 2).
 #
-# On Linux/Windows, keeps the single-instance profile (35B-A3B on 8080).
+# On Linux/Windows, keeps the single-instance profile (35B-A3B on 8080) with
+# the full 262144-token context on a single slot (-c 262144 -np 1).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,14 +18,12 @@ source "${SCRIPT_DIR}/_common.sh"
 
 PLATFORM="$(detect_platform)"
 HOST="${LLAMACPP_HOST:-127.0.0.1}"
-# Per-slot context: Mac dual-instance launcher runs -c 524288 -np 2 (262144
-# per slot = the model's native n_ctx_train). Non-Mac single-instance keeps
-# -c 262144 -np 2 (131072 per slot).
-if [[ "${PLATFORM}" == "mac" ]]; then
-  CONTEXT_SIZE_DEFAULT=262144
-else
-  CONTEXT_SIZE_DEFAULT=131072
-fi
+# Per-slot context = model's native n_ctx_train (262144) on every platform.
+# Mac runs -c 524288 -np 2 (two slots per instance). Linux/Windows run
+# -c 262144 -np 1 so the single client gets the full window; opencode auto-
+# compaction otherwise fires at ~79K with two slots (overflow buffer eats
+# ~52K of a 131K per-slot context).
+CONTEXT_SIZE_DEFAULT=262144
 CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-${CONTEXT_SIZE_DEFAULT}}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-16384}"
 

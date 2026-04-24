@@ -93,12 +93,13 @@ Every instance launched through `server_start_llamacpp.sh` always passes:
 ```
 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 \
 -ngl 99 -fa on --alias "${LLAMACPP_SERVED_ALIAS:-qwen}" --jinja \
--np 2 --reasoning on
+--reasoning on
 ```
 
-Total `-c` and therefore per-slot context differs by platform; both platforms
-sit at or below the model's `n_ctx_train` (262144) so no YaRN scaling is
-involved.
+`-np` is caller-dependent: the launcher defaults to `-np 1` (single-slot full
+context on Linux/Windows), and the Mac orchestrator passes `LLAMACPP_PARALLEL=2`
+to each of its two instances. Per-slot context lands at the model's native
+`n_ctx_train` (262144) on every platform, so no YaRN scaling is involved.
 
 Plus `--cpu-moe` on Linux and Windows (the local 16 GB VRAM box cannot hold the
 Q4_K_M experts on GPU). On Mac unified memory makes `--cpu-moe` counterproductive,
@@ -120,13 +121,20 @@ Default deployment per platform:
 
 | Host            | Instances                        | `--alias`                    | `-np` | `-c`   | Per-slot ctx |
 | --------------- | -------------------------------- | ---------------------------- | ----- | ------ | ------------ |
-| Linux / Windows | 35B-A3B on :8080                 | `qwen`                       | 2     | 262144 | 131072       |
+| Linux / Windows | 35B-A3B on :8080                 | `qwen`                       | 1     | 262144 | 262144       |
 | macOS           | 35B-A3B on :8080, 27B on :8081   | `qwen-35b-a3b`, `qwen-27b`   | 2 ea. | 524288 | 262144       |
 
-On Mac each slot gets 256K — exactly the model's native `n_ctx_train`. The 27B
-is dense, so its KV cache per token is ~3× the MoE's (64 layers / 4 KV heads vs
-40 / 2): at 256K per slot the 27B's KV envelope is ~68 GiB, and combined
-footprint for both instances is ~130 GiB on the 256 GB box.
+Every slot on every platform gets 256K — exactly the model's native
+`n_ctx_train`. Linux/Windows run one slot because a single local user rarely
+needs two concurrent decode streams and halving the window made opencode
+auto-compaction fire at ~79K conversation tokens instead of ~210K (compaction
+triggers at `context - 32K output - 20K buffer`). With `-np 1` compaction
+still blocks the only slot for the duration of the summary call, but the user
+gets ~2.6× more working context before that happens and the session always
+recovers. On Mac the dense 27B's KV cache per token is ~3× the MoE's (64
+layers / 4 KV heads vs 40 / 2): at 256K per slot the 27B's KV envelope is
+~68 GiB, and combined footprint for both instances is ~130 GiB on the 256 GB
+box.
 
 Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`. The
 Mac orchestrator also accepts these and forwards them to both instances.
