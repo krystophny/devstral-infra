@@ -103,31 +103,44 @@ ci/
 Every instance launched through `server_start_llamacpp.sh` always passes:
 
 ```
---cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 \
+--cache-type-k q8_0 --cache-type-v q8_0 -b 2048 \
 -ngl 99 -fa on --alias "${LLAMACPP_SERVED_ALIAS:-qwen}" --jinja \
 --reasoning on
 ```
 
-`-np` is caller-dependent: the launcher defaults to `-np 1` (single-slot full
-context on Linux/Windows), and the Mac orchestrator passes `LLAMACPP_PARALLEL=2`
-to each of its two instances. Per-slot context lands at the model's native
-`n_ctx_train` (262144) on every platform, so no YaRN scaling is involved.
+`-np`, `-ub`, and MoE placement are caller/platform-dependent. The launcher
+defaults to `-np 1 -ub 1024 --n-cpu-moe 30` (partial MoE offload, 10/40
+routed-expert layers on GPU, small enough compute buffer to coexist with
+whisper + TTS). The Mac orchestrator passes `LLAMACPP_PARALLEL=2` and no
+MoE split. Per-slot context lands at the model's native `n_ctx_train`
+(262144) on every platform, so no YaRN scaling is involved.
 
-Plus `--cpu-moe` on Linux and Windows (the local 16 GB VRAM box cannot hold the
-Q4_K_M experts on GPU). On Mac unified memory makes `--cpu-moe` counterproductive,
-so Metal holds everything.
+On Linux/Windows partial MoE offload replaces the old blanket `--cpu-moe`.
+Benchmark on RTX 5060 Ti 16 GB with Qwen3.6-35B-A3B Q4_K_M at c=262144:
+
+| Config                              | VRAM  | Prefill | Decode |
+| ----------------------------------- | ----- | ------- | ------ |
+| `--cpu-moe -ub 512` (old baseline)  | ~5.3G | ~300    | 33.0   |
+| `--n-cpu-moe 30 -ub 1024` (default) | 11.0G | 647     | 39.7   |
+| `--n-cpu-moe 30 -ub 2048`           | 12.6G | 830     | 39.9   |
+| `--n-cpu-moe 25 -ub 1024`           | 13.3G | 748     | 44.1   |
+| `--n-cpu-moe 20 -ub 1024`           | OOM   | —       | —      |
+
+The chosen default delivers 2.15x prefill and 1.20x decode vs the old
+baseline while holding ~4 GB of VRAM in reserve for `whisper-server`
+(~1 GB resident) and the future qwen3-tts neighbour. `LLAMACPP_CPU_MOE=true`
+is kept as an emergency escape hatch that forces `--n-cpu-moe 99` (all
+experts on CPU) for hosts with heavier GPU neighbours.
 
 Linux and Windows also pass `--threads <physical_cores - 2> --threads-http 4`
-(clamped to a minimum of 2). Rationale: `--cpu-moe` decode on Qwen3-Next is
+(clamped to a minimum of 2). Rationale: MoE decode on Qwen3-Next is
 memory-bandwidth-bound and by default llama-server grabs every core. That
 starves the rest of userspace — Claude Code's HTTP/2 keepalive and opencode's
 Bun HTTP pool both miss their scheduling windows long enough for the server
 side to send idle-timeout RSTs. Reserving 2 physical cores for the host
-eliminates the host-side stall and is why a local inference workload was
-breaking unrelated TCP streams on the same box. Mac is untouched (Metal
-schedules on its own, user sees no stalls in unified-memory mode); defaults
-can be overridden per invocation via `LLAMACPP_THREADS` /
-`LLAMACPP_THREADS_HTTP`.
+eliminates the host-side stall. Mac is untouched (Metal schedules on its
+own, user sees no stalls in unified-memory mode); defaults can be overridden
+per invocation via `LLAMACPP_THREADS` / `LLAMACPP_THREADS_HTTP`.
 
 Default deployment per platform:
 
