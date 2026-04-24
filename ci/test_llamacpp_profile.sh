@@ -279,12 +279,86 @@ EOF
   echo "PASS: setup backend dispatch accepts prebuilt/cuda-source, rejects bogus"
 }
 
+test_server_exec_mode() {
+  echo "TEST: LLAMACPP_EXEC=true replaces the shell with llama-server"
+  local home_dir="${TMPDIR}/home-exec"
+  local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  local stamp="${TMPDIR}/exec-args"
+  mkdir -p "${home_dir}/.local/llama.cpp"
+  cat > "${home_dir}/.local/llama.cpp/llama-server" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "${stamp}"
+exit 0
+EOF
+  chmod +x "${home_dir}/.local/llama.cpp/llama-server"
+  : > "${model_path}"
+
+  HOME="${home_dir}" \
+  LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
+  LLAMACPP_MODEL="${model_path}" \
+  LLAMACPP_PORT=18084 \
+  LLAMACPP_SMOKE_TEST=false \
+  LLAMACPP_EXEC=true \
+  bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh" >/dev/null 2>&1
+
+  if [[ ! -s "${stamp}" ]]; then
+    echo "FAIL: exec-mode launcher did not invoke llama-server"
+    return 1
+  fi
+  if grep -qx -- '-np' "${stamp}" \
+    && grep -qx -- '1' "${stamp}" \
+    && grep -qx -- '--port' "${stamp}" \
+    && grep -qx -- '18084' "${stamp}"; then
+    echo "PASS: exec-mode passes -np 1 and --port through to llama-server"
+  else
+    echo "FAIL: exec-mode argv did not include expected flags"
+    cat "${stamp}"
+    return 1
+  fi
+}
+
+test_install_linux_systemd_dry_run() {
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "SKIP: install_linux_systemd dry-run (Linux-only)"
+    return 0
+  fi
+  echo "TEST: install_linux_systemd.sh dry-run writes the expected unit"
+  local home_dir="${TMPDIR}/home-install"
+  local unit_dir="${TMPDIR}/units"
+  mkdir -p "${home_dir}" "${unit_dir}"
+  local unit_file="${unit_dir}/devstral-llamacpp.service"
+
+  HOME="${home_dir}" \
+  INSTALL_DRY_RUN=true \
+  UNIT_DIR="${unit_dir}" \
+  bash "${REPO_ROOT}/scripts/install_linux_systemd.sh" >/dev/null
+
+  if [[ ! -f "${unit_file}" ]]; then
+    echo "FAIL: unit file was not written"
+    return 1
+  fi
+  if grep -q '^ExecStart=.*server_start_llamacpp\.sh$' "${unit_file}" \
+    && grep -q '^Environment=LLAMACPP_EXEC=true$' "${unit_file}" \
+    && grep -q '^Environment=LLAMACPP_SMOKE_TEST=false$' "${unit_file}" \
+    && grep -q '^Restart=on-failure$' "${unit_file}" \
+    && grep -q '^\[Install\]$' "${unit_file}" \
+    && grep -q '^WantedBy=default.target$' "${unit_file}"; then
+    echo "PASS: unit invokes the launcher in exec mode with restart policy"
+  else
+    echo "FAIL: unit file missing expected directives"
+    cat "${unit_file}"
+    return 1
+  fi
+}
+
 test_server_start_dry_run || FAILED=$((FAILED + 1))
 test_server_start_instance_overrides || FAILED=$((FAILED + 1))
 test_server_start_thread_override || FAILED=$((FAILED + 1))
+test_server_exec_mode || FAILED=$((FAILED + 1))
 test_opencode_config || FAILED=$((FAILED + 1))
 test_models_default_alias || FAILED=$((FAILED + 1))
 test_setup_backend_selection || FAILED=$((FAILED + 1))
+test_install_linux_systemd_dry_run || FAILED=$((FAILED + 1))
 
 if [[ "${FAILED}" -gt 0 ]]; then
   echo "${FAILED} test(s) failed"
