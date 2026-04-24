@@ -109,28 +109,33 @@ Every instance launched through `server_start_llamacpp.sh` always passes:
 ```
 
 `-np`, `-ub`, and MoE placement are caller/platform-dependent. The launcher
-defaults to `-np 1 -ub 1024 --n-cpu-moe 30` (partial MoE offload, 10/40
+defaults to `-np 1 -ub 1024 --n-cpu-moe 35` (partial MoE offload, 5/40
 routed-expert layers on GPU, small enough compute buffer to coexist with
-whisper + TTS). The Mac orchestrator passes `LLAMACPP_PARALLEL=2` and no
-MoE split. Per-slot context lands at the model's native `n_ctx_train`
-(262144) on every platform, so no YaRN scaling is involved.
+whisper-server and Qwen3-TTS). The Mac orchestrator passes
+`LLAMACPP_PARALLEL=2` and no MoE split. Per-slot context lands at the
+model's native `n_ctx_train` (262144) on every platform, so no YaRN
+scaling is involved.
 
 On Linux/Windows partial MoE offload replaces the old blanket `--cpu-moe`.
 Benchmark on RTX 5060 Ti 16 GB with Qwen3.6-35B-A3B Q4_K_M at c=262144:
 
-| Config                              | VRAM  | Prefill | Decode |
-| ----------------------------------- | ----- | ------- | ------ |
-| `--cpu-moe -ub 512` (old baseline)  | ~5.3G | ~300    | 33.0   |
-| `--n-cpu-moe 30 -ub 1024` (default) | 11.0G | 647     | 39.7   |
-| `--n-cpu-moe 30 -ub 2048`           | 12.6G | 830     | 39.9   |
-| `--n-cpu-moe 25 -ub 1024`           | 13.3G | 748     | 44.1   |
-| `--n-cpu-moe 20 -ub 1024`           | OOM   | —       | —      |
+| Config                                 | llama  | Prefill | Decode | Stack peak | Free |
+| -------------------------------------- | ------ | ------- | ------ | ---------- | ---- |
+| `--cpu-moe -ub 512` (old baseline)     | ~5.3G  | ~300    | 33.0   | n/a        | n/a  |
+| `--n-cpu-moe 30 -ub 1024`              | 11.0G  | 647     | 39.7   | TTS OOM    | —    |
+| `--n-cpu-moe 33 -ub 1024`              | 9.65G  | 594     | 38.6   | 15.6G      | 0.2G |
+| `--n-cpu-moe 35 -ub 1024` (default)    | 8.72G  | 569     | 37.0   | 14.6G      | 1.3G |
+| `--n-cpu-moe 35 -ub 512`               | 7.94G  | 335     | 37.0   | 13.8G      | 2.0G |
+| `--n-cpu-moe 25 -ub 1024`              | 13.3G  | 748     | 44.1   | TTS OOM    | —    |
 
-The chosen default delivers 2.15x prefill and 1.20x decode vs the old
-baseline while holding ~4 GB of VRAM in reserve for `whisper-server`
-(~1 GB resident) and the future qwen3-tts neighbour. `LLAMACPP_CPU_MOE=true`
-is kept as an emergency escape hatch that forces `--n-cpu-moe 99` (all
-experts on CPU) for hosts with heavier GPU neighbours.
+"Stack peak" is llama + whisper-server (~0.9 G) + Qwen3-TTS loaded and
+synthesising (~4.4 G peak). The chosen default delivers 1.9x prefill and
+1.12x decode vs the old all-CPU-moe baseline while leaving ~1.3 G free
+for OS pressure and further GPU callers. Raising to `--n-cpu-moe 33`
+gains ~4 % prefill and decode but shrinks the free margin to 0.2 GB —
+one TTS spike away from OOM. `LLAMACPP_CPU_MOE=true` remains as an
+emergency escape hatch that forces `--n-cpu-moe 99` (all experts on
+CPU) for even more crowded GPUs.
 
 Linux and Windows also pass `--threads <physical_cores - 2> --threads-http 4`
 (clamped to a minimum of 2). Rationale: MoE decode on Qwen3-Next is
