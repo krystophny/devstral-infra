@@ -101,13 +101,13 @@ case "${PLATFORM}" in
     DEFAULT_MODEL="llamacpp/qwen-27b"
     SMALL_MODEL="llamacpp-moe/qwen-35b-a3b"
     PROVIDER_BLOCK="$(provider_block_dual_mac)"
-    DISABLED='"disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"]'
+    DISABLED='"disabled_providers": ["exa", "opencode", "llmgateway", "github-copilot", "copilot", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"]'
     ;;
   *)
     DEFAULT_MODEL="${OPENCODE_LOCAL_DEFAULT_MODEL:-llamacpp/qwen}"
     SMALL_MODEL="${OPENCODE_LOCAL_SMALL_MODEL:-llamacpp/qwen}"
     PROVIDER_BLOCK="$(provider_block_single 8080 qwen "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)")"
-    DISABLED='"disabled_providers": ["exa", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"]'
+    DISABLED='"disabled_providers": ["exa", "opencode", "llmgateway", "github-copilot", "copilot", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"]'
     ;;
 esac
 
@@ -122,6 +122,9 @@ cat > "${CONFIG_PATH}" <<EOF
   "share": "disabled",
   "autoupdate": false,
   "permission": "allow",
+  "tools": {
+    "websearch": false
+  },
   "experimental": {
     "openTelemetry": false
   },
@@ -129,6 +132,10 @@ cat > "${CONFIG_PATH}" <<EOF
 ${PROVIDER_BLOCK}
 }
 EOF
+
+if [[ "${OPENCODE_SKIP_PRIVACY_ENV:-false}" != "true" ]]; then
+  bash "${SCRIPT_DIR}/opencode_privacy.sh"
+fi
 
 echo "configured OpenCode:"
 echo "- config: ${CONFIG_PATH}"

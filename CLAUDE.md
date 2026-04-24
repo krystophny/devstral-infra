@@ -36,12 +36,39 @@ badly enough that the inter-token stalls trigger `ECONNRESET` in the opencode
 client mid-stream. Set `LLAMACPP_BACKEND=prebuilt` to force the Vulkan path
 on a box that has the toolkit but shouldn't build from source.
 
+## Telemetry lockdown
+
+All three install paths pin the following user-level environment variables
+(HKCU on Windows, `~/.profile` + `environment.d` on Linux/macOS) so opencode
+makes no outbound call beyond the configured LLM endpoint:
+
+| Var                                | Blocks                                    |
+| ---------------------------------- | ----------------------------------------- |
+| `OPENCODE_DISABLE_AUTOUPDATE=1`    | GitHub release / brew / choco version probes |
+| `OPENCODE_DISABLE_SHARE=1`         | session upload to opencode.ai              |
+| `OPENCODE_DISABLE_MODELS_FETCH=1`  | `https://models.dev/api.json`              |
+| `OPENCODE_DISABLE_LSP_DOWNLOAD=1`  | clangd/texlab/zls autofetch from GitHub    |
+| `OPENCODE_DISABLE_DEFAULT_PLUGINS=1` | built-in github-copilot / llmgateway probes |
+| `OPENCODE_DISABLE_EMBEDDED_WEB_UI=1` | bundled web-ui code path                  |
+
+`opencode.json` on every platform also sets `share: "disabled"`,
+`autoupdate: false`, `tools.websearch: false`, `experimental.openTelemetry: false`,
+and extends `disabled_providers` with `opencode`, `llmgateway`, `github-copilot`,
+`copilot` alongside the already-excluded cloud providers.
+
+All of this is idempotent: re-running `install.sh` / `install.bat` rewrites
+in place. No admin or sudo required. Upstream still has open feature requests
+for a first-class air-gapped mode (ggml-org/opencode issues #16117 / #18492),
+so if a future release introduces a new phone-home path this list has to be
+revisited.
+
 ## Repo map
 
 ```
 scripts/
   _common.sh                    shared bash helpers (paths, platform detect, stop_pid)
   setup_llamacpp.sh             prebuilt download (default), or CUDA source build on Linux+NVIDIA
+  opencode_privacy.sh           pin OPENCODE_DISABLE_* env vars in ~/.profile + environment.d (idempotent)
   llamacpp_models.py            default + optional model aliases; prefetch/resolve
   server_start_llamacpp.sh      single-instance launcher (LAN-capable by default)
   server_stop_llamacpp.sh
