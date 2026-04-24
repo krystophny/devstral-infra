@@ -31,12 +31,17 @@ EOF
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
   )"
 
-  local platform cpu_moe_ok=1
+  local platform moe_ok=1
   platform="$(uname -s)"
   if [[ "${platform}" == "Darwin" ]]; then
-    [[ "${output}" != *"--cpu-moe"* ]] || cpu_moe_ok=0
+    # Mac: no MoE split at all — experts live in unified memory.
+    [[ "${output}" != *"--n-cpu-moe"* ]] || moe_ok=0
+    [[ "${output}" != *"--cpu-moe"* ]] || moe_ok=0
   else
-    [[ "${output}" == *"--cpu-moe"* ]] || cpu_moe_ok=0
+    # Non-Mac: partial MoE offload tuned for 16 GB CUDA + TTS/STT neighbours.
+    [[ "${output}" == *"--n-cpu-moe 30"* ]] || moe_ok=0
+    # The legacy --cpu-moe flag must not be emitted anymore.
+    [[ "${output}" != *"--cpu-moe "* ]] || moe_ok=0
   fi
 
   # Thread caps: only pinned on non-Mac. On Mac the flags must be absent.
@@ -60,12 +65,13 @@ EOF
         "${output}" == *"--top-k 20"* && \
         "${output}" == *"--port 18080"* && \
         "${output}" == *"-np 1"* && \
+        "${output}" == *"-ub 1024"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
-        "${cpu_moe_ok}" == "1" && \
+        "${moe_ok}" == "1" && \
         "${threads_ok}" == "1" ]]; then
-    echo "PASS: launcher emits the blessed single-instance profile (-np 1)"
+    echo "PASS: launcher emits the blessed single-instance profile (-np 1, -ub 1024, --n-cpu-moe 30)"
   else
-    echo "FAIL: launcher profile mismatch (cpu_moe_ok=${cpu_moe_ok} threads_ok=${threads_ok})"
+    echo "FAIL: launcher profile mismatch (moe_ok=${moe_ok} threads_ok=${threads_ok})"
     echo "${output}"
     return 1
   fi
@@ -144,7 +150,8 @@ EOF
   if [[ "${output}" == *"--alias qwen-27b"* && \
         "${output}" == *"--port 18081"* && \
         "${output}" == *"- instance: 27b"* && \
-        "${output}" == *"-np 1"* ]]; then
+        "${output}" == *"-np 1"* && \
+        "${output}" == *"-ub 1024"* ]]; then
     echo "PASS: instance suffix and served alias take effect"
   else
     echo "FAIL: instance override did not propagate"
@@ -308,11 +315,52 @@ EOF
   if grep -qx -- '-np' "${stamp}" \
     && grep -qx -- '1' "${stamp}" \
     && grep -qx -- '--port' "${stamp}" \
-    && grep -qx -- '18084' "${stamp}"; then
-    echo "PASS: exec-mode passes -np 1 and --port through to llama-server"
+    && grep -qx -- '18084' "${stamp}" \
+    && grep -qx -- '--n-cpu-moe' "${stamp}" \
+    && grep -qx -- '30' "${stamp}" \
+    && grep -qx -- '-ub' "${stamp}" \
+    && grep -qx -- '1024' "${stamp}"; then
+    echo "PASS: exec-mode argv has -np 1, -ub 1024, --n-cpu-moe 30"
   else
     echo "FAIL: exec-mode argv did not include expected flags"
     cat "${stamp}"
+    return 1
+  fi
+}
+
+test_server_legacy_cpu_moe_fallback() {
+  echo "TEST: LLAMACPP_CPU_MOE=true still works as the 'all experts on CPU' escape hatch"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "SKIP: legacy CPU_MOE fallback (Linux/Windows only)"
+    return 0
+  fi
+  local home_dir="${TMPDIR}/home-legacymoe"
+  local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  mkdir -p "${home_dir}/.local/llama.cpp"
+  cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${home_dir}/.local/llama.cpp/llama-server"
+  : > "${model_path}"
+
+  local output
+  output="$(
+    HOME="${home_dir}" \
+    LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
+    LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_PORT=18086 \
+    LLAMACPP_CPU_MOE=true \
+    LLAMACPP_SMOKE_TEST=false \
+    LLAMACPP_DRY_RUN=true \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  if [[ "${output}" == *"--n-cpu-moe 99"* && "${output}" != *"--n-cpu-moe 30"* ]]; then
+    echo "PASS: LLAMACPP_CPU_MOE=true pins --n-cpu-moe 99 (all experts on CPU)"
+  else
+    echo "FAIL: legacy CPU_MOE fallback did not emit --n-cpu-moe 99"
+    echo "${output}"
     return 1
   fi
 }
@@ -355,6 +403,7 @@ test_server_start_dry_run || FAILED=$((FAILED + 1))
 test_server_start_instance_overrides || FAILED=$((FAILED + 1))
 test_server_start_thread_override || FAILED=$((FAILED + 1))
 test_server_exec_mode || FAILED=$((FAILED + 1))
+test_server_legacy_cpu_moe_fallback || FAILED=$((FAILED + 1))
 test_opencode_config || FAILED=$((FAILED + 1))
 test_models_default_alias || FAILED=$((FAILED + 1))
 test_setup_backend_selection || FAILED=$((FAILED + 1))

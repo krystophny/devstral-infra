@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Start one llama-server instance. Defaults match the blessed Qwen3.6 profile:
 #   Q8_0 KV cache, flash attention, 256K single-slot context,
-#   --cpu-moe on Linux/Windows, Metal (no --cpu-moe) on Mac, reasoning enabled.
+#   partial MoE offload (--n-cpu-moe 30, -ub 1024) tuned for a 16 GB CUDA
+#   GPU coexisting with whisper + piper + future TTS neighbours on
+#   Linux/Windows; Metal (no MoE split) on Mac; reasoning enabled.
 #
 # This script runs a single instance. For the Mac dual-instance deployment
 # (35B-A3B on 8080 + 27B on 8081) use scripts/server_start_mac.sh, which calls
@@ -19,7 +21,12 @@
 #   LLAMACPP_PORT         listen port (default 8080)
 #   LLAMACPP_HOST         bind host (default 0.0.0.0)
 #   LLAMACPP_PARALLEL     concurrent slots (default 1; Mac orchestrator passes 2)
-#   LLAMACPP_CPU_MOE      force on/off (default: on for non-Mac)
+#   LLAMACPP_N_CPU_MOE    number of MoE expert layers to keep on CPU
+#                         (default 30 on non-Mac -> 10/40 layers on GPU; empty on Mac)
+#   LLAMACPP_CPU_MOE      legacy on/off; true forces --n-cpu-moe 99 (all on CPU);
+#                         only takes effect when LLAMACPP_N_CPU_MOE is unset.
+#   LLAMACPP_UBATCH       physical batch (default 1024 on non-Mac; empty on Mac)
+#   LLAMACPP_BATCH        logical batch (default 2048)
 #   LLAMACPP_THREADS      compute threads (default: physical_cores - 2, min 2; Mac: unset)
 #   LLAMACPP_THREADS_HTTP HTTP listener threads (default: 4 on CPU-MoE hosts; Mac: unset)
 #   LLAMACPP_DRY_RUN      true to print the command and exit
@@ -72,7 +79,12 @@ HOST="${LLAMACPP_HOST:-0.0.0.0}"
 PORT="${LLAMACPP_PORT:-8080}"
 CONTEXT="${LLAMACPP_CONTEXT:-262144}"
 BATCH="${LLAMACPP_BATCH:-2048}"
-UBATCH="${LLAMACPP_UBATCH:-512}"
+# -ub sizes the GPU compute buffer. On a 16 GB RTX 5060 Ti with --n-cpu-moe 30
+# and c=262144, -ub 1024 lands at ~11.0 GB VRAM (prefill 647 t/s, decode 39.7
+# t/s on Qwen3.6-35B-A3B Q4_K_M). Going to -ub 2048 pushes compute buffer up
+# ~1.5 GB for +28% prefill with no decode gain — left as an override for
+# lightly-loaded hosts.
+UBATCH="${LLAMACPP_UBATCH:-1024}"
 NGL="${LLAMACPP_NGL:-99}"
 
 # One slot per instance by default. Halving the full 262144 context across two
@@ -84,16 +96,28 @@ NGL="${LLAMACPP_NGL:-99}"
 # keep each of its two models at two slots on the 256 GB unified-memory box.
 PARALLEL="${LLAMACPP_PARALLEL:-1}"
 
-CPU_MOE_DEFAULT="false"
-[[ "${PLATFORM}" != "mac" ]] && CPU_MOE_DEFAULT="true"
-CPU_MOE="${LLAMACPP_CPU_MOE:-${CPU_MOE_DEFAULT}}"
+# Partial MoE offload: on a 16 GB CUDA GPU coexisting with whisper-server
+# (~1 GB resident) and a future qwen3-tts neighbour, --n-cpu-moe 30 puts
+# expert layers 0..29 on CPU and 30..39 on GPU. At c=262144 -ub 1024 total
+# VRAM is ~11.0 GB, which leaves ~4 GB for the other services and ~1 GB OS
+# overhead. Bench on this hardware (RTX 5060 Ti) measured 2.15x prefill and
+# 1.20x decode vs the all-CPU-moe baseline — see commit history for numbers.
+# Mac keeps everything in unified memory; no split. Setting LLAMACPP_CPU_MOE=
+# true forces the old all-CPU-moe path (--n-cpu-moe 99) for emergencies.
+N_CPU_MOE_DEFAULT=""
+[[ "${PLATFORM}" != "mac" ]] && N_CPU_MOE_DEFAULT="30"
+N_CPU_MOE="${LLAMACPP_N_CPU_MOE:-${N_CPU_MOE_DEFAULT}}"
+if [[ -z "${LLAMACPP_N_CPU_MOE:-}" && "${LLAMACPP_CPU_MOE:-false}" == "true" ]]; then
+  N_CPU_MOE="99"
+fi
 
-# Thread caps: only pin on CPU-MoE hosts. On Mac the experts live in unified
-# memory and Metal manages its own scheduler; no stalls have been observed,
-# so leave llama.cpp's defaults in place. On Linux/Windows --cpu-moe pegs
-# every core for memory-bandwidth-bound decode, which starves unrelated
-# userspace (Claude Code, opencode, DE) long enough for remote idle timeouts
-# to send RSTs. Reserving 2 physical cores eliminates the host-side stall.
+# Thread caps: only pin on non-Mac. On Mac the experts live in unified memory
+# and Metal manages its own scheduler; no stalls have been observed, so
+# leave llama.cpp's defaults in place. On Linux/Windows the CPU-resident
+# expert layers peg every core for memory-bandwidth-bound decode, which
+# starves unrelated userspace (Claude Code, opencode, DE) long enough for
+# remote idle timeouts to send RSTs. Reserving 2 physical cores eliminates
+# the host-side stall.
 THREADS=""
 THREADS_HTTP=""
 if [[ "${PLATFORM}" != "mac" ]]; then
@@ -161,8 +185,8 @@ CMD=(
   -np "${PARALLEL}"
 )
 CMD+=("${SAMPLER_ARGS[@]}")
-if [[ "${CPU_MOE}" == "true" ]]; then
-  CMD+=(--cpu-moe)
+if [[ -n "${N_CPU_MOE}" && "${N_CPU_MOE}" != "0" ]]; then
+  CMD+=(--n-cpu-moe "${N_CPU_MOE}")
 fi
 if [[ -n "${THREADS}" ]]; then
   CMD+=(--threads "${THREADS}" --threads-http "${THREADS_HTTP}")
@@ -176,8 +200,13 @@ echo "- alias:   ${MODEL_ALIAS} (served as ${SERVED_ALIAS})"
 echo "- bind:    ${HOST}:${PORT}"
 echo "- context: ${CONTEXT}"
 echo "- slots:   ${PARALLEL}"
+echo "- batch:   b=${BATCH} ub=${UBATCH}"
 echo "- KV:      q8_0 / q8_0"
-echo "- cpu-moe: ${CPU_MOE}"
+if [[ -n "${N_CPU_MOE}" && "${N_CPU_MOE}" != "0" ]]; then
+  echo "- n-cpu-moe: ${N_CPU_MOE} (first N expert layers on CPU; rest on GPU)"
+else
+  echo "- n-cpu-moe: off (all experts on GPU / unified memory)"
+fi
 if [[ -n "${THREADS}" ]]; then
   echo "- threads: ${THREADS} compute / ${THREADS_HTTP} http"
 fi
