@@ -7,21 +7,25 @@ Guidance for Claude Code working inside this repository.
 One blessed local coding stack, nothing else:
 
 - **Runtime**: `llama-server` from the latest upstream ggml-org/llama.cpp release.
-- **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M`, launched from alias `qwen3.6-35b-a3b-q4` and served as `qwen`.
+- **Models**:
+  - `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M` — alias `qwen3.6-35b-a3b-q4`.
+  - `bartowski/Qwen_Qwen3.6-27B-GGUF` at `Q4_K_M` — alias `qwen3.6-27b-q4` (macOS only).
 - **Harness**: `opencode` CLI, title generation disabled, reasoning on.
 
-Bundle targets and the local development scripts both use port `8080`. The
-launcher binds `0.0.0.0` by default so the host can also expose the service on
-the LAN when desired.
+macOS runs a dual-instance deployment — dense 27B on port `8081` (OpenCode
+default) and MoE 35B-A3B on port `8080` (small_model, USB bundle port).
+Linux/Windows and the USB bundles keep the single-instance 35B-A3B on port
+`8080`. The launcher binds `0.0.0.0` by default so the host can also expose the
+service on the LAN.
 
-| OS      | Backend | CPU-MoE | User service          |
-| ------- | ------- | ------- | --------------------- |
-| Linux   | CUDA    | on      | `systemd --user`      |
-| Windows | Vulkan  | on      | `schtasks ONLOGON`    |
-| macOS   | Metal   | off     | launchd user agent    |
+| OS      | Backend | Instances | Models served                   | User service        |
+| ------- | ------- | --------- | ------------------------------- | ------------------- |
+| Linux   | CUDA    | 1         | 35B-A3B `qwen` :8080            | `systemd --user`    |
+| Windows | Vulkan  | 1         | 35B-A3B `qwen` :8080            | `schtasks ONLOGON`  |
+| macOS   | Metal   | 2         | 27B `qwen-27b` :8081, 35B-A3B `qwen-35b-a3b` :8080 | launchd user agent |
 
-No root or admin is required anywhere. The only automatic download is the one
-GGUF and the two binaries.
+No root or admin is required anywhere. The only automatic downloads are the two
+GGUFs (one on non-Mac) and the two binaries.
 
 ## Repo map
 
@@ -29,11 +33,13 @@ GGUF and the two binaries.
 scripts/
   _common.sh                    shared bash helpers (paths, platform detect, stop_pid)
   setup_llamacpp.sh             fetch latest upstream release, unpack to ~/.local/llama.cpp
-  llamacpp_models.py            one default model + optional aliases; prefetch/resolve
-  server_start_llamacpp.sh      single-instance launcher (port 8080, LAN-capable by default)
+  llamacpp_models.py            default + optional model aliases; prefetch/resolve
+  server_start_llamacpp.sh      single-instance launcher (LAN-capable by default)
   server_stop_llamacpp.sh
+  server_start_mac.sh           macOS dual-instance orchestrator (35B :8080 + 27B :8081)
+  server_stop_mac.sh
   opencode_install.sh           curl|bash (online) or OPENCODE_OFFLINE_ARCHIVE (USB)
-  opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json
+  opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json (dual on Mac, single on PC)
   build_bundle.sh               build USB-ready per-OS trees with embedded installers
   usb_format.sh                 exFAT format + skeleton (requires sudo, typed confirm)
 
@@ -46,26 +52,35 @@ ci/
 
 ## Flags that are load-bearing
 
-The launcher always passes:
+Every instance launched through `server_start_llamacpp.sh` always passes:
 
 ```
 -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 \
--ngl 99 -fa on --alias qwen --jinja --reasoning on
+-ngl 99 -fa on --alias "${LLAMACPP_SERVED_ALIAS:-qwen}" --jinja \
+-np 2 --reasoning on
 ```
 
-`-c 262144` matches the model's `n_ctx_train`, so no YaRN scaling is involved.
+`-c 262144 -np 2` = 131072 tokens per slot (128K) — matches the model's
+`n_ctx_train` so no YaRN scaling is involved.
 
 Plus `--cpu-moe` on Linux and Windows (the local 16 GB VRAM box cannot hold the
-Q4_K_M experts on GPU; the M1's unified memory makes CPU-MoE counterproductive).
+Q4_K_M experts on GPU). On Mac unified memory makes `--cpu-moe` counterproductive,
+so Metal holds everything.
 
-Parallel slots (`-np`) default per platform:
+Default deployment per platform:
 
-| Host                 | `-np` | Per-slot ctx | Rationale                                     |
-| -------------------- | ----- | ------------ | --------------------------------------------- |
-| Linux / Windows      | 2     | 131072       | CPU-MoE is DDR-bandwidth-bound; 2 slots let OpenCode run main + one subagent concurrently without duplicating weights |
-| macOS (unified mem)  | 4     | 65536        | 256 GB unified memory has headroom; matches upstream default |
+| Host            | Instances                   | `--alias`                    | `-np` | Per-slot ctx |
+| --------------- | --------------------------- | ---------------------------- | ----- | ------------ |
+| Linux / Windows | 35B-A3B on :8080            | `qwen`                       | 2     | 131072       |
+| macOS           | 35B-A3B on :8080, 27B on :8081 | `qwen-35b-a3b`, `qwen-27b` | 2 each | 131072       |
 
-Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`.
+On Mac the 27B is a dense model so its KV cache per token is ~3× the MoE's
+(64 layers / 4 KV heads vs 40 / 2). Per-slot 128K keeps the 27B's KV envelope
+around 17 GiB; combined footprint for both instances is ~85 GiB on the 256 GB
+box.
+
+Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`. The
+Mac orchestrator also accepts these and forwards them to both instances.
 
 ## Don't reintroduce
 
