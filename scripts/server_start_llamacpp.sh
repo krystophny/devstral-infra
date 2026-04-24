@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# Start llama-server with the blessed Qwen3.6 35B A3B Q4_K_M profile:
-#   - 256K context (n_ctx_train), Q8_0 KV cache, flash attention
-#   - CPU-MoE on for Linux/Windows (MoE experts on CPU, attention on GPU)
-#   - Parallel slots: 2 on CPU-MoE hosts (Linux/Windows), 4 on Mac unified memory
-#   - Single bound alias "qwen", Jinja templating, reasoning enabled
+# Start one llama-server instance. Defaults match the blessed Qwen3.6 profile:
+#   Q8_0 KV cache, flash attention, 128K per-slot context across 2 parallel slots,
+#   --cpu-moe on Linux/Windows, Metal (no --cpu-moe) on Mac, reasoning enabled.
+#
+# This script runs a single instance. For the Mac dual-instance deployment
+# (35B-A3B on 8080 + 27B on 8081) use scripts/server_start_mac.sh, which calls
+# this script twice with instance-specific ports, aliases, and file names.
 #
 # Env overrides:
-#   LLAMACPP_HOME       install dir (default ~/.local/llama.cpp)
-#   LLAMACPP_SERVER_BIN explicit llama-server binary
-#   LLAMACPP_MODEL      explicit GGUF path (else resolved via llamacpp_models.py)
-#   LLAMACPP_MODEL_ALIAS alias to resolve from the model registry (default: blessed)
-#   LLAMACPP_CONTEXT    total context size across all slots (default 262144)
-#   LLAMACPP_PORT       listen port (default 8080)
-#   LLAMACPP_HOST       bind host (default 0.0.0.0)
-#   LLAMACPP_PARALLEL   max concurrent slots (default 2 on CPU-MoE hosts, 4 on Mac)
-#   LLAMACPP_CPU_MOE    force on/off (default: on for non-Mac)
-#   LLAMACPP_DRY_RUN    true to print the command and exit
-#   LLAMACPP_SMOKE_TEST false to skip the post-start /v1/chat/completions probe
+#   LLAMACPP_HOME         install dir (default ~/.local/llama.cpp)
+#   LLAMACPP_SERVER_BIN   explicit llama-server binary
+#   LLAMACPP_MODEL        explicit GGUF path (else resolved via llamacpp_models.py)
+#   LLAMACPP_MODEL_ALIAS  alias from the model registry (default: blessed)
+#   LLAMACPP_INSTANCE     name suffix for pid/port/log files (default: empty -> .run/llamacpp.*)
+#   LLAMACPP_SERVED_ALIAS --alias served in /v1/models (default: qwen)
+#   LLAMACPP_CONTEXT      total context size across slots (default 262144, i.e. 128K x 2 slots)
+#   LLAMACPP_PORT         listen port (default 8080)
+#   LLAMACPP_HOST         bind host (default 0.0.0.0)
+#   LLAMACPP_PARALLEL     concurrent slots (default 2)
+#   LLAMACPP_CPU_MOE      force on/off (default: on for non-Mac)
+#   LLAMACPP_DRY_RUN      true to print the command and exit
+#   LLAMACPP_SMOKE_TEST   false to skip the post-start /v1/chat/completions probe
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,24 +68,26 @@ BATCH="${LLAMACPP_BATCH:-2048}"
 UBATCH="${LLAMACPP_UBATCH:-512}"
 NGL="${LLAMACPP_NGL:-99}"
 
-# Per-platform defaults: CPU-MoE hosts are DDR-bandwidth-bound on decode, so
-# doubling slots roughly doubles wall-clock throughput when the opencode
-# harness fans out parallel subagent requests, without duplicating weights.
-# Mac has unified memory and can afford the upstream default of 4 slots.
-if [[ "${PLATFORM}" == "mac" ]]; then
-  PARALLEL_DEFAULT=4
-else
-  PARALLEL_DEFAULT=2
-fi
-PARALLEL="${LLAMACPP_PARALLEL:-${PARALLEL_DEFAULT}}"
+# Two concurrent slots per instance: on CPU-MoE hosts it lets the harness fan
+# out a main request plus one subagent without duplicating weights; on Mac
+# the dual-instance deployment gives each model its own pair of slots.
+PARALLEL="${LLAMACPP_PARALLEL:-2}"
 
 CPU_MOE_DEFAULT="false"
 [[ "${PLATFORM}" != "mac" ]] && CPU_MOE_DEFAULT="true"
 CPU_MOE="${LLAMACPP_CPU_MOE:-${CPU_MOE_DEFAULT}}"
 
-PID_FILE="${RUN_DIR}/llamacpp.pid"
-PORT_FILE="${RUN_DIR}/llamacpp.port"
-LOG_FILE="${LOG_DIR}/llamacpp.log"
+SERVED_ALIAS="${LLAMACPP_SERVED_ALIAS:-qwen}"
+INSTANCE="${LLAMACPP_INSTANCE:-}"
+if [[ -n "${INSTANCE}" ]]; then
+  PID_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.pid"
+  PORT_FILE="${RUN_DIR}/llamacpp-${INSTANCE}.port"
+  LOG_FILE="${LOG_DIR}/llamacpp-${INSTANCE}.log"
+else
+  PID_FILE="${RUN_DIR}/llamacpp.pid"
+  PORT_FILE="${RUN_DIR}/llamacpp.port"
+  LOG_FILE="${LOG_DIR}/llamacpp.log"
+fi
 
 DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
 SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
@@ -126,7 +132,7 @@ CMD=(
   --cache-type-v q8_0
   --host "${HOST}"
   --port "${PORT}"
-  --alias qwen
+  --alias "${SERVED_ALIAS}"
   --jinja
   -np "${PARALLEL}"
 )
@@ -139,12 +145,13 @@ echo "starting llama.cpp server"
 echo "- binary:  ${LLAMA_SERVER}"
 "${LLAMA_SERVER}" --version 2>&1 | awk '/^version: / || /^built with /{print "- " $0}' || true
 echo "- model:   ${MODEL_PATH}"
-echo "- alias:   ${MODEL_ALIAS}"
+echo "- alias:   ${MODEL_ALIAS} (served as ${SERVED_ALIAS})"
 echo "- bind:    ${HOST}:${PORT}"
 echo "- context: ${CONTEXT}"
 echo "- slots:   ${PARALLEL}"
 echo "- KV:      q8_0 / q8_0"
 echo "- cpu-moe: ${CPU_MOE}"
+[[ -n "${INSTANCE}" ]] && echo "- instance: ${INSTANCE}"
 
 if [[ "${DRY_RUN}" == "true" ]]; then
   printf '%q ' "${CMD[@]}"
@@ -181,7 +188,7 @@ if [[ "${SMOKE_TEST}" == "true" ]]; then
   echo "running chat smoke test..."
   resp="$(curl -fsS "http://${probe_host}:${PORT}/v1/chat/completions" \
     -H "content-type: application/json" \
-    -d '{"model":"qwen","messages":[{"role":"user","content":"Reply with exactly READY."}],"max_tokens":16}')"
+    -d "{\"model\":\"${SERVED_ALIAS}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly READY.\"}],\"max_tokens\":16}")"
   if [[ "${resp}" == *'"content"'* ]]; then
     echo "smoke test OK"
   else
