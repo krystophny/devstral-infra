@@ -31,15 +31,17 @@ EOF
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
   )"
 
-  local platform cpu_moe_ok=1
+  local platform cpu_moe_ok=1 expected_np
   platform="$(uname -s)"
   if [[ "${platform}" == "Darwin" ]]; then
     [[ "${output}" != *"--cpu-moe"* ]] || cpu_moe_ok=0
+    expected_np="-np 4"
   else
     [[ "${output}" == *"--cpu-moe"* ]] || cpu_moe_ok=0
+    expected_np="-np 2"
   fi
 
-  if [[ "${output}" == *"-c 131072"* && \
+  if [[ "${output}" == *"-c 262144"* && \
         "${output}" == *"--cache-type-k q8_0"* && \
         "${output}" == *"--cache-type-v q8_0"* && \
         "${output}" == *"-fa on"* && \
@@ -49,12 +51,12 @@ EOF
         "${output}" == *"--top-p 0.95"* && \
         "${output}" == *"--top-k 20"* && \
         "${output}" == *"--port 18080"* && \
-        "${output}" == *"-np 1"* && \
+        "${output}" == *"${expected_np}"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
         "${cpu_moe_ok}" == "1" ]]; then
-    echo "PASS: launcher emits the blessed profile"
+    echo "PASS: launcher emits the blessed profile (${expected_np})"
   else
-    echo "FAIL: launcher profile mismatch"
+    echo "FAIL: launcher profile mismatch (expected ${expected_np})"
     echo "${output}"
     return 1
   fi
