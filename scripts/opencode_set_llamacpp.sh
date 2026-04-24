@@ -15,6 +15,10 @@ PORT="${LLAMACPP_PORT:-8080}"
 API_BASE="${OPENCODE_LOCAL_API_BASE:-http://${HOST}:${PORT}/v1}"
 
 MODEL_ID="${OPENCODE_LOCAL_MODEL_ID:-qwen}"
+# Per-slot context. Launcher runs -c 262144 split across slots
+# (2 on CPU-MoE hosts, 4 on Mac). OpenCode sees a single slot, so advertise
+# the per-slot cap: 262144/2 = 131072. Override via OPENCODE_LOCAL_CONTEXT
+# when LLAMACPP_PARALLEL differs.
 CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-131072}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-16384}"
 PROVIDER_NAME="${OPENCODE_LOCAL_PROVIDER_NAME:-llama.cpp (Local)}"

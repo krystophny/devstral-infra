@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Start llama-server with the blessed Qwen3.6 35B A3B Q4_K_M profile:
-#   - 128K context (131072), Q8_0 KV cache, flash attention
+#   - 256K context (n_ctx_train), Q8_0 KV cache, flash attention
 #   - CPU-MoE on for Linux/Windows (MoE experts on CPU, attention on GPU)
+#   - Parallel slots: 2 on CPU-MoE hosts (Linux/Windows), 4 on Mac unified memory
 #   - Single bound alias "qwen", Jinja templating, reasoning enabled
 #
 # Env overrides:
@@ -9,10 +10,10 @@
 #   LLAMACPP_SERVER_BIN explicit llama-server binary
 #   LLAMACPP_MODEL      explicit GGUF path (else resolved via llamacpp_models.py)
 #   LLAMACPP_MODEL_ALIAS alias to resolve from the model registry (default: blessed)
-#   LLAMACPP_CONTEXT    context size (default 131072)
+#   LLAMACPP_CONTEXT    total context size across all slots (default 262144)
 #   LLAMACPP_PORT       listen port (default 8080)
 #   LLAMACPP_HOST       bind host (default 0.0.0.0)
-#   LLAMACPP_PARALLEL   max concurrent sessions / slots (default 1)
+#   LLAMACPP_PARALLEL   max concurrent slots (default 2 on CPU-MoE hosts, 4 on Mac)
 #   LLAMACPP_CPU_MOE    force on/off (default: on for non-Mac)
 #   LLAMACPP_DRY_RUN    true to print the command and exit
 #   LLAMACPP_SMOKE_TEST false to skip the post-start /v1/chat/completions probe
@@ -58,11 +59,21 @@ fi
 # --- Runtime parameters ---
 HOST="${LLAMACPP_HOST:-0.0.0.0}"
 PORT="${LLAMACPP_PORT:-8080}"
-CONTEXT="${LLAMACPP_CONTEXT:-131072}"
+CONTEXT="${LLAMACPP_CONTEXT:-262144}"
 BATCH="${LLAMACPP_BATCH:-2048}"
 UBATCH="${LLAMACPP_UBATCH:-512}"
 NGL="${LLAMACPP_NGL:-99}"
-PARALLEL="${LLAMACPP_PARALLEL:-1}"
+
+# Per-platform defaults: CPU-MoE hosts are DDR-bandwidth-bound on decode, so
+# doubling slots roughly doubles wall-clock throughput when the opencode
+# harness fans out parallel subagent requests, without duplicating weights.
+# Mac has unified memory and can afford the upstream default of 4 slots.
+if [[ "${PLATFORM}" == "mac" ]]; then
+  PARALLEL_DEFAULT=4
+else
+  PARALLEL_DEFAULT=2
+fi
+PARALLEL="${LLAMACPP_PARALLEL:-${PARALLEL_DEFAULT}}"
 
 CPU_MOE_DEFAULT="false"
 [[ "${PLATFORM}" != "mac" ]] && CPU_MOE_DEFAULT="true"

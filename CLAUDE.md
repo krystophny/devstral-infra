@@ -49,12 +49,23 @@ ci/
 The launcher always passes:
 
 ```
--c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 \
+-c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 \
 -ngl 99 -fa on --alias qwen --jinja --reasoning on
 ```
 
+`-c 262144` matches the model's `n_ctx_train`, so no YaRN scaling is involved.
+
 Plus `--cpu-moe` on Linux and Windows (the local 16 GB VRAM box cannot hold the
 Q4_K_M experts on GPU; the M1's unified memory makes CPU-MoE counterproductive).
+
+Parallel slots (`-np`) default per platform:
+
+| Host                 | `-np` | Per-slot ctx | Rationale                                     |
+| -------------------- | ----- | ------------ | --------------------------------------------- |
+| Linux / Windows      | 2     | 131072       | CPU-MoE is DDR-bandwidth-bound; 2 slots let OpenCode run main + one subagent concurrently without duplicating weights |
+| macOS (unified mem)  | 4     | 65536        | 256 GB unified memory has headroom; matches upstream default |
+
+Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`.
 
 ## Don't reintroduce
 
