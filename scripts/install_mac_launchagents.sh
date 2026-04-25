@@ -40,8 +40,20 @@ resolve_model() {
   echo "${path}"
 }
 
+resolve_mmproj_optional() {
+  local alias="$1" path
+  path="$(python3 "${MODELS_SCRIPT}" resolve-mmproj "${alias}" 2>/dev/null || true)"
+  if [[ -n "${path}" && -f "${path}" ]]; then
+    echo "${path}"
+  fi
+}
+
 MODEL_35B="$(resolve_model qwen3.6-35b-a3b-q4)"
 MODEL_27B="$(resolve_model qwen3.6-27b-q4)"
+MMPROJ_35B="$(resolve_mmproj_optional qwen3.6-35b-a3b-q4)"
+MMPROJ_27B="$(resolve_mmproj_optional qwen3.6-27b-q4)"
+[[ -n "${MMPROJ_35B}" ]] || die "mmproj for qwen3.6-35b-a3b-q4 not on disk. Run: python3 ${MODELS_SCRIPT} prefetch qwen3.6-35b-a3b-q4"
+[[ -n "${MMPROJ_27B}" ]] || die "mmproj for qwen3.6-27b-q4 not on disk. Run: python3 ${MODELS_SCRIPT} prefetch qwen3.6-27b-q4"
 
 bootout_if_loaded() {
   local label="$1" plist="${AGENTS_DIR}/${1}.plist"
@@ -65,9 +77,14 @@ wait_gone() {
 }
 
 write_plist() {
-  local label="$1" port="$2" alias="$3" model="$4" instance="$5"
+  local label="$1" port="$2" alias="$3" model="$4" instance="$5" mmproj="${6:-}"
   local plist="${AGENTS_DIR}/${label}.plist"
   local log="${LOG_DIR_ABS}/llamacpp-${instance}.log"
+  local mmproj_xml=""
+  if [[ -n "${mmproj}" ]]; then
+    mmproj_xml="    <string>--mmproj</string><string>${mmproj}</string>
+"
+  fi
   cat > "${plist}" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -81,7 +98,7 @@ write_plist() {
   <array>
     <string>${SERVER_BIN}</string>
     <string>-m</string><string>${model}</string>
-    <string>-c</string><string>524288</string>
+${mmproj_xml}    <string>-c</string><string>524288</string>
     <string>-b</string><string>2048</string>
     <string>-ub</string><string>512</string>
     <string>-ngl</string><string>99</string>
@@ -116,11 +133,15 @@ XML
   launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
   wait_gone "${label}" || die "failed to unload existing ${label}"
   launchctl bootstrap "gui/$(id -u)" "${plist}"
-  echo "loaded ${label} (port ${port}, alias ${alias})"
+  if [[ -n "${mmproj}" ]]; then
+    echo "loaded ${label} (port ${port}, alias ${alias}, mmproj $(basename "${mmproj}"))"
+  else
+    echo "loaded ${label} (port ${port}, alias ${alias})"
+  fi
 }
 
-write_plist com.devstral.llamacpp-35b-a3b 8080 qwen-35b-a3b "${MODEL_35B}" 35b-a3b
-write_plist com.devstral.llamacpp-27b     8081 qwen-27b     "${MODEL_27B}" 27b
+write_plist com.devstral.llamacpp-35b-a3b 8080 qwen-35b-a3b "${MODEL_35B}" 35b-a3b "${MMPROJ_35B}"
+write_plist com.devstral.llamacpp-27b     8081 qwen-27b     "${MODEL_27B}" 27b     "${MMPROJ_27B}"
 
 echo
 echo "waiting for both endpoints (up to 900s each)..."
