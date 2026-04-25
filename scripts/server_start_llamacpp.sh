@@ -14,6 +14,7 @@
 #   LLAMACPP_HOME         install dir (default ~/.local/llama.cpp)
 #   LLAMACPP_SERVER_BIN   explicit llama-server binary
 #   LLAMACPP_MODEL        explicit GGUF path (else resolved via llamacpp_models.py)
+#   LLAMACPP_MMPROJ       explicit multimodal projector path; "off" disables
 #   LLAMACPP_MODEL_ALIAS  alias from the model registry (default: blessed)
 #   LLAMACPP_INSTANCE     name suffix for pid/port/log files (default: empty -> .run/llamacpp.*)
 #   LLAMACPP_SERVED_ALIAS --alias served in /v1/models (default: qwen)
@@ -30,6 +31,9 @@
 #   LLAMACPP_BATCH        logical batch (default 2048)
 #   LLAMACPP_THREADS      compute threads (default: physical_cores - 2, min 2; Mac: unset)
 #   LLAMACPP_THREADS_HTTP HTTP listener threads (default: 4 on CPU-MoE hosts; Mac: unset)
+#   LLAMACPP_REASONING_BUDGET
+#                         hidden-reasoning token cap (default: 4096;
+#                         -1 restores unrestricted)
 #   LLAMACPP_DRY_RUN      true to print the command and exit
 #   LLAMACPP_EXEC         true to exec llama-server in the foreground (for
 #                         systemd/launchd ExecStart); skips nohup, pid files,
@@ -46,15 +50,7 @@ PLATFORM="$(detect_platform)"
 MODELS_SCRIPT="${SCRIPT_DIR}/llamacpp_models.py"
 
 # --- Binary resolution ---
-SERVER_EXE="llama-server"
-[[ "${PLATFORM}" == "windows" ]] && SERVER_EXE="llama-server.exe"
-if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
-  LLAMA_SERVER="${LLAMACPP_SERVER_BIN}"
-elif [[ -x "${LLAMACPP_HOME}/${SERVER_EXE}" ]]; then
-  LLAMA_SERVER="${LLAMACPP_HOME}/${SERVER_EXE}"
-elif have "${SERVER_EXE}"; then
-  LLAMA_SERVER="$(command -v "${SERVER_EXE}")"
-else
+if ! LLAMA_SERVER="$(resolve_llamacpp_server_bin)"; then
   die "llama-server not installed. Run: scripts/setup_llamacpp.sh"
 fi
 [[ -x "${LLAMA_SERVER}" ]] || die "not executable: ${LLAMA_SERVER}"
@@ -74,6 +70,21 @@ if [[ -z "${MODEL_PATH}" ]]; then
 fi
 [[ -n "${MODEL_PATH}" ]] || die "model not found. Run: scripts/llamacpp_models.py prefetch"
 [[ -f "${MODEL_PATH}" || "${LLAMACPP_DRY_RUN:-false}" == "true" ]] || die "model file missing: ${MODEL_PATH}"
+
+MMPROJ_PATH="${LLAMACPP_MMPROJ:-}"
+if [[ -z "${MMPROJ_PATH}" ]]; then
+  if resolved_mmproj="$(python3 "${MODELS_SCRIPT}" resolve-mmproj "${MODEL_ALIAS}" 2>/dev/null)" \
+      && [[ -n "${resolved_mmproj}" && -f "${resolved_mmproj}" ]]; then
+    MMPROJ_PATH="${resolved_mmproj}"
+  fi
+fi
+if [[ "${MMPROJ_PATH}" == "off" || "${MMPROJ_PATH}" == "none" ]]; then
+  MMPROJ_PATH=""
+elif [[ -z "${MMPROJ_PATH}" && "${MODEL_ALIAS}" == "${DEFAULT_ALIAS}" ]]; then
+  die "mmproj not found for ${MODEL_ALIAS}. Run: scripts/llamacpp_models.py prefetch"
+fi
+[[ -z "${MMPROJ_PATH}" || -f "${MMPROJ_PATH}" || "${LLAMACPP_DRY_RUN:-false}" == "true" ]] \
+  || die "mmproj file missing: ${MMPROJ_PATH}"
 
 # --- Runtime parameters ---
 HOST="${LLAMACPP_HOST:-0.0.0.0}"
@@ -114,19 +125,23 @@ if [[ -z "${LLAMACPP_N_CPU_MOE:-}" && "${LLAMACPP_CPU_MOE:-false}" == "true" ]];
   N_CPU_MOE="99"
 fi
 
-# Thread caps: only pin on non-Mac. On Mac the experts live in unified memory
-# and Metal manages its own scheduler; no stalls have been observed, so
-# leave llama.cpp's defaults in place. On Linux/Windows the CPU-resident
-# expert layers peg every core for memory-bandwidth-bound decode, which
-# starves unrelated userspace (Claude Code, opencode, DE) long enough for
-# remote idle timeouts to send RSTs. Reserving 2 physical cores eliminates
-# the host-side stall.
+# Thread caps: on Mac Metal manages its own scheduler so no auto-pinning.
+# Explicit overrides via LLAMACPP_THREADS / LLAMACPP_THREADS_HTTP are still
+# honored so power users can tune. On Linux/Windows the CPU-resident expert
+# layers peg every core for memory-bandwidth-bound decode, which starves
+# unrelated userspace (Claude Code, opencode, DE) long enough for remote
+# idle timeouts to send RSTs. Reserving 2 physical cores eliminates the
+# host-side stall.
 THREADS=""
 THREADS_HTTP=""
 if [[ "${PLATFORM}" != "mac" ]]; then
   THREADS="${LLAMACPP_THREADS:-$(default_compute_threads)}"
   THREADS_HTTP="${LLAMACPP_THREADS_HTTP:-4}"
+elif [[ -n "${LLAMACPP_THREADS:-}" ]]; then
+  THREADS="${LLAMACPP_THREADS}"
+  THREADS_HTTP="${LLAMACPP_THREADS_HTTP:-}"
 fi
+REASONING_BUDGET="${LLAMACPP_REASONING_BUDGET:-$(default_reasoning_budget)}"
 
 SERVED_ALIAS="${LLAMACPP_SERVED_ALIAS:-qwen}"
 INSTANCE="${LLAMACPP_INSTANCE:-}"
@@ -165,6 +180,7 @@ case "${MODEL_ALIAS}" in
       --presence-penalty 0.0
       --repeat-penalty 1.0
       --reasoning-format deepseek
+      --reasoning-budget "${REASONING_BUDGET}"
       --no-context-shift
       --reasoning on
     )
@@ -187,6 +203,9 @@ CMD=(
   --jinja
   -np "${PARALLEL}"
 )
+if [[ -n "${MMPROJ_PATH}" ]]; then
+  CMD+=(--mmproj "${MMPROJ_PATH}")
+fi
 CMD+=("${SAMPLER_ARGS[@]}")
 if [[ -n "${N_CPU_MOE}" && "${N_CPU_MOE}" != "0" ]]; then
   CMD+=(--n-cpu-moe "${N_CPU_MOE}")
@@ -199,6 +218,7 @@ echo "starting llama.cpp server"
 echo "- binary:  ${LLAMA_SERVER}"
 "${LLAMA_SERVER}" --version 2>&1 | awk '/^version: / || /^built with /{print "- " $0}' || true
 echo "- model:   ${MODEL_PATH}"
+[[ -n "${MMPROJ_PATH}" ]] && echo "- mmproj:  ${MMPROJ_PATH}"
 echo "- alias:   ${MODEL_ALIAS} (served as ${SERVED_ALIAS})"
 echo "- bind:    ${HOST}:${PORT}"
 echo "- context: ${CONTEXT}"
@@ -213,6 +233,7 @@ fi
 if [[ -n "${THREADS}" ]]; then
   echo "- threads: ${THREADS} compute / ${THREADS_HTTP} http"
 fi
+echo "- reasoning budget: ${REASONING_BUDGET}"
 [[ -n "${INSTANCE}" ]] && echo "- instance: ${INSTANCE}"
 
 if [[ "${DRY_RUN}" == "true" ]]; then

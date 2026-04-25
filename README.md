@@ -1,6 +1,6 @@
 # devstral-infra
 
-Single-path local coding stack: **llama.cpp + Qwen3.6 35B A3B (Q4_K_M) + OpenCode**,
+Single-path local coding stack: **llama.cpp + Qwen3.6 35B A3B (Q4_K_M) + OpenCode + Pi**,
 packaged so a USB stick hands it to a Linux, macOS, or Windows machine with no
 root, no admin, and no internet.
 
@@ -16,7 +16,7 @@ License: [MIT](LICENSE)
 
 - **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M` (~20 GB), served as `qwen`.
 - **Runtime**: `llama-server` (upstream release, Q8_0 KV, 128 K context, `-fa on`, `--jinja`).
-- **Harness**: `opencode`, title generation disabled, `reasoning: true`, `thinking_budget: 4096`.
+- **Harnesses**: `opencode` and Pi, title generation disabled for OpenCode, local llama.cpp provider, telemetry disabled, `reasoning: true`, server-enforced thinking budget (`4096` by default).
 
 Nothing else is downloaded automatically. Optional aliases live in
 `scripts/llamacpp_models.py` for manual prefetch only, including the FortBench
@@ -44,6 +44,7 @@ scripts/setup_llamacpp.sh                     # fetch latest upstream release fo
 python3 scripts/llamacpp_models.py prefetch   # download the blessed model
 scripts/server_start_llamacpp.sh              # foreground run, smoke test
 scripts/opencode_install.sh                   # curl|bash the opencode CLI
+scripts/pi_install.sh                         # npm install Pi Coding Agent + local config
 scripts/opencode_set_llamacpp.sh              # write ~/.config/opencode/opencode.json
 opencode                                      # go
 ```
@@ -61,6 +62,7 @@ Layout it produces:
 /tmp/qwenstack/
   README.txt
   models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
+  models/mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf
   linux-cuda/   {llama.cpp/, opencode/, install.sh, start.sh}
   mac-m1/       {llama.cpp/, opencode/, install.sh, start.sh}
   windows-arc/  {llama.cpp/, opencode/, install.bat, start.bat}
