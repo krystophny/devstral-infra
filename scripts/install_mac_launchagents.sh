@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Install macOS launchd user agents for the dual-instance llama.cpp deployment:
-#   com.devstral.llamacpp-35b-a3b -> 35B-A3B Q4 (MoE) on 127.0.0.1:8080
-#   com.devstral.llamacpp-27b     -> 27B    Q4 (dense) on 127.0.0.1:8081
+#   com.slopcode.llamacpp-35b-a3b -> 35B-A3B Q4 (MoE) on 127.0.0.1:8080
+#   com.slopcode.llamacpp-27b     -> 27B    Q4 (dense) on 127.0.0.1:8081
 #
 # Each agent sets KeepAlive=true and RunAtLoad=true so the servers come up on
-# login and restart on crash. If a legacy single-instance agent
-# com.devstral.llamacpp-local is present, it is booted out first.
+# login and restart on crash. Legacy single-instance and devstral-named
+# labels (com.devstral.llamacpp-*, com.slopcode.llamacpp-macbook,
+# com.qwenstack.llamacpp) are booted out first.
 #
 # Env overrides:
 #   LLAMACPP_SERVER_BIN  llama-server path (default: ~/.local/llama.cpp/
@@ -64,8 +65,16 @@ bootout_if_loaded() {
   rm -f "${plist}"
 }
 
-# Legacy single-instance agent -> remove.
-bootout_if_loaded com.devstral.llamacpp-local
+# Boot out every legacy or single-instance label this project has shipped.
+for legacy in com.qwenstack.llamacpp \
+              com.devstral.llamacpp-local \
+              com.devstral.llamacpp-macbook \
+              com.devstral.llamacpp-35b-a3b \
+              com.devstral.llamacpp-27b \
+              com.slopcode.llamacpp-local \
+              com.slopcode.llamacpp-macbook; do
+  bootout_if_loaded "${legacy}"
+done
 
 wait_gone() {
   local label="$1" deadline=$(( $(date +%s) + 10 ))
@@ -140,8 +149,8 @@ XML
   fi
 }
 
-write_plist com.devstral.llamacpp-35b-a3b 8080 qwen-35b-a3b "${MODEL_35B}" 35b-a3b "${MMPROJ_35B}"
-write_plist com.devstral.llamacpp-27b     8081 qwen-27b     "${MODEL_27B}" 27b     "${MMPROJ_27B}"
+write_plist com.slopcode.llamacpp-35b-a3b 8080 qwen-35b-a3b "${MODEL_35B}" 35b-a3b "${MMPROJ_35B}"
+write_plist com.slopcode.llamacpp-27b     8081 qwen-27b     "${MODEL_27B}" 27b     "${MMPROJ_27B}"
 
 echo
 echo "waiting for both endpoints (up to 900s each)..."

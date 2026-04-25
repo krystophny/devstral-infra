@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Format a USB stick as exFAT and lay down the qwenstack skeleton on it.
+# Format a USB stick as exFAT and lay down the slopcode skeleton on it.
 #
 # Usage:
 #   scripts/usb_format.sh /dev/sdX "QWENSTACK"
@@ -47,7 +47,7 @@ sudo mount "${DEV}" "${mnt}"
 sudo install -d -o "$(id -u)" -g "$(id -g)" "${mnt}/models" "${mnt}/linux-cuda" "${mnt}/mac-m1" "${mnt}/windows-arc"
 sudo chown -R "$(id -u):$(id -g)" "${mnt}"
 cat > "${mnt}/README.txt" <<'EOF'
-Empty qwenstack bundle skeleton. Populate with:
+Empty slopcode bundle skeleton. Populate with:
   scripts/build_bundle.sh all --out <this-directory>
 EOF
 sudo umount "${mnt}"

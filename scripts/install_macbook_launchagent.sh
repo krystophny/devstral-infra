@@ -35,7 +35,7 @@ model_path="$(python3 "${MODELS_SCRIPT}" resolve 2>/dev/null || true)"
 [[ -n "${model_path}" && -f "${model_path}" ]] \
   || die "35B-A3B model not on disk. Run: python3 ${MODELS_SCRIPT} prefetch"
 
-LABEL="com.devstral.llamacpp-macbook"
+LABEL="com.slopcode.llamacpp-macbook"
 PLIST="${AGENTS_DIR}/${LABEL}.plist"
 LOG="${RUN_DIR}/llamacpp.log"
 
@@ -49,7 +49,14 @@ wait_gone() {
   return 0
 }
 
-for old_label in "${LABEL}" com.devstral.llamacpp-local com.devstral.llamacpp-35b-a3b com.devstral.llamacpp-27b; do
+for old_label in "${LABEL}" \
+                 com.devstral.llamacpp-local \
+                 com.devstral.llamacpp-35b-a3b \
+                 com.devstral.llamacpp-27b \
+                 com.devstral.llamacpp-macbook \
+                 com.slopcode.llamacpp-local \
+                 com.slopcode.llamacpp-35b-a3b \
+                 com.slopcode.llamacpp-27b; do
   old_plist="${AGENTS_DIR}/${old_label}.plist"
   if launchctl list 2>/dev/null | awk '{print $3}' | grep -qx "${old_label}"; then
     echo "unloading ${old_label}"

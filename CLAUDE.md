@@ -28,7 +28,7 @@ No root or admin is required anywhere. The only automatic downloads are the two
 GGUFs (one on non-Mac) and the two binaries.
 
 The Linux service is installed by `scripts/install_linux_systemd.sh`: it writes
-`~/.config/systemd/user/devstral-llamacpp.service`, whose ExecStart invokes
+`~/.config/systemd/user/slopcode-llamacpp.service`, whose ExecStart invokes
 `server_start_llamacpp.sh` with `LLAMACPP_EXEC=true` so llama-server runs in
 the foreground under systemd. The installer runs `loginctl enable-linger`
 (no sudo in the common case) so the service survives logout and starts at
@@ -83,7 +83,7 @@ scripts/
   server_stop_llamacpp.sh
   server_start_mac.sh           macOS dual-instance orchestrator (35B :8080 + 27B :8081)
   server_stop_mac.sh
-  install_linux_systemd.sh      write & enable ~/.config/systemd/user/devstral-
+  install_linux_systemd.sh      write & enable ~/.config/systemd/user/slopcode-
                                 llamacpp.service; enable-linger for boot autostart
   install_mac_launchagents.sh   macOS launchd user agents for the dual-instance stack
   opencode_install.sh           curl|bash (online) or OPENCODE_OFFLINE_ARCHIVE (USB)

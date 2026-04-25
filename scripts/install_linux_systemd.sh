@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the slopcode-infra llama.cpp user service on Linux.
 #
-# Writes ~/.config/systemd/user/devstral-llamacpp.service, enables and starts
+# Writes ~/.config/systemd/user/slopcode-llamacpp.service, enables and starts
 # it, and (if polkit permits) enables loginctl linger so it survives logout
 # and starts at boot. No root required in the common path; if the distro
 # denies self-linger, the script prints the one-time sudo command.
@@ -9,14 +9,14 @@
 # Idempotent: re-run after editing scripts/server_start_llamacpp.sh to pick
 # up launcher changes. The unit simply invokes the launcher with
 # LLAMACPP_EXEC=true, so launcher updates (flags, threads, port, -np, ...)
-# propagate on the next `systemctl --user restart devstral-llamacpp`.
+# propagate on the next `systemctl --user restart slopcode-llamacpp`.
 #
 # Env overrides (mostly for tests):
 #   INSTALL_DRY_RUN   true to write the unit into UNIT_DIR and stop — skips
 #                     systemctl / loginctl / curl probe.
 #   UNIT_DIR          target dir for the unit file (default
 #                     ~/.config/systemd/user).
-#   SERVICE_NAME      unit name without .service (default devstral-llamacpp).
+#   SERVICE_NAME      unit name without .service (default slopcode-llamacpp).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +30,7 @@ case "${PLATFORM}" in
 esac
 
 DRY_RUN="${INSTALL_DRY_RUN:-false}"
-SERVICE_NAME="${SERVICE_NAME:-devstral-llamacpp}"
+SERVICE_NAME="${SERVICE_NAME:-slopcode-llamacpp}"
 UNIT_DIR="${UNIT_DIR:-${HOME}/.config/systemd/user}"
 UNIT_FILE="${UNIT_DIR}/${SERVICE_NAME}.service"
 
@@ -38,11 +38,22 @@ if [[ "${DRY_RUN}" != "true" ]]; then
   have systemctl || die "systemctl not found (non-systemd distro?)"
   have loginctl  || die "loginctl not found"
 
+  # Boot out the previous user units (devstral-named, qwenstack) so the new
+  # slopcode-llamacpp service doesn't race a stale ExecStart on the same port.
+  for legacy in devstral-llamacpp qwenstack-llamacpp; do
+    [[ "${legacy}" == "${SERVICE_NAME}" ]] && continue
+    if systemctl --user list-unit-files "${legacy}.service" 2>/dev/null | grep -q "${legacy}.service"; then
+      echo "removing legacy user unit ${legacy}.service"
+      systemctl --user disable --now "${legacy}.service" 2>/dev/null || true
+      rm -f "${UNIT_DIR}/${legacy}.service"
+    fi
+  done
+
   # Refuse to install alongside a root-owned unit of the same name or the
-  # bundle's qwenstack unit — removing root units is out of scope for an
+  # bundle's legacy unit — removing root units is out of scope for an
   # unprivileged installer and would silently fight this one over port 8080.
   root_units="$(systemctl list-unit-files --full --no-pager 2>/dev/null \
-    | awk '/^(devstral-llamacpp|qwenstack-llamacpp)\.service /{print $1}')"
+    | awk '/^(slopcode-llamacpp|devstral-llamacpp|qwenstack-llamacpp)\.service /{print $1}')"
   if [[ -n "${root_units}" ]]; then
     die "system-wide llama.cpp unit(s) present: ${root_units//$'\n'/ }
 remove first (one-time sudo), then re-run this installer:

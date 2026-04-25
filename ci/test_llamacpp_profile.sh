@@ -474,7 +474,7 @@ test_install_linux_systemd_dry_run() {
   local home_dir="${TMPDIR}/home-install"
   local unit_dir="${TMPDIR}/units"
   mkdir -p "${home_dir}" "${unit_dir}"
-  local unit_file="${unit_dir}/devstral-llamacpp.service"
+  local unit_file="${unit_dir}/slopcode-llamacpp.service"
 
   HOME="${home_dir}" \
   INSTALL_DRY_RUN=true \
