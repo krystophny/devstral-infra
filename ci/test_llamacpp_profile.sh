@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck disable=SC1091
+source "${REPO_ROOT}/scripts/_common.sh"
 
 FAILED=0
 TMPDIR="$(mktemp -d)"
@@ -12,6 +14,7 @@ test_server_start_dry_run() {
   echo "TEST: llama.cpp launcher dry-run profile"
   local home_dir="${TMPDIR}/home"
   local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  local mmproj_path="${TMPDIR}/mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf"
   mkdir -p "${home_dir}/.local/llama.cpp"
   cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
 #!/usr/bin/env bash
@@ -19,12 +22,16 @@ exit 0
 EOF
   chmod +x "${home_dir}/.local/llama.cpp/llama-server"
   : > "${model_path}"
+  : > "${mmproj_path}"
 
   local output
+  local reasoning_budget
+  reasoning_budget="$(default_reasoning_budget)"
   output="$(
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_MMPROJ="${mmproj_path}" \
     LLAMACPP_PORT=18080 \
     LLAMACPP_SMOKE_TEST=false \
     LLAMACPP_DRY_RUN=true \
@@ -61,6 +68,7 @@ EOF
         "${output}" == *"--alias qwen"* && \
         "${output}" == *"--jinja"* && \
         "${output}" == *"--reasoning-format deepseek"* && \
+        "${output}" == *"--reasoning-budget ${reasoning_budget}"* && \
         "${output}" == *"--top-p 0.95"* && \
         "${output}" == *"--top-k 20"* && \
         "${output}" == *"--port 18080"* && \
@@ -81,6 +89,7 @@ test_server_start_thread_override() {
   echo "TEST: launcher honors LLAMACPP_THREADS override"
   local home_dir="${TMPDIR}/home-threads"
   local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  local mmproj_path="${TMPDIR}/mmproj-threads.gguf"
   mkdir -p "${home_dir}/.local/llama.cpp"
   cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
 #!/usr/bin/env bash
@@ -88,12 +97,14 @@ exit 0
 EOF
   chmod +x "${home_dir}/.local/llama.cpp/llama-server"
   : > "${model_path}"
+  : > "${mmproj_path}"
 
   local output
   output="$(
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_MMPROJ="${mmproj_path}" \
     LLAMACPP_PORT=18082 \
     LLAMACPP_THREADS=7 \
     LLAMACPP_THREADS_HTTP=3 \
@@ -139,6 +150,7 @@ EOF
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_MMPROJ=off \
     LLAMACPP_PORT=18081 \
     LLAMACPP_INSTANCE=27b \
     LLAMACPP_SERVED_ALIAS=qwen-27b \
@@ -172,11 +184,15 @@ test_opencode_config() {
   bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
 
   local common_ok=1
+  local reasoning_budget
+  reasoning_budget="$(default_reasoning_budget)"
   grep -q '"disable": true' "${config_path}" || common_ok=0
   grep -q '"permission": "allow"' "${config_path}" || common_ok=0
   grep -q '"output": 16384' "${config_path}" || common_ok=0
   grep -q '"reasoning": true' "${config_path}" || common_ok=0
-  grep -q '"thinking_budget": 4096' "${config_path}" || common_ok=0
+  grep -q '"attachment": true' "${config_path}" || common_ok=0
+  grep -q '"modalities": {"input": \["text", "image"\], "output": \["text"\]}' "${config_path}" || common_ok=0
+  grep -q "\"thinking_budget\": ${reasoning_budget}" "${config_path}" || common_ok=0
   grep -q '"temperature": 0.6' "${config_path}" || common_ok=0
   grep -q '"top_p": 0.95' "${config_path}" || common_ok=0
   grep -q '"top_k": 20' "${config_path}" || common_ok=0
@@ -194,13 +210,25 @@ test_opencode_config() {
 
   local platform_ok=1
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    grep -q '"model": "llamacpp/qwen-27b"' "${config_path}" || platform_ok=0
-    grep -q '"small_model": "llamacpp-moe/qwen-35b-a3b"' "${config_path}" || platform_ok=0
-    grep -q '"context": 262144' "${config_path}" || platform_ok=0
-    grep -q 'http://127.0.0.1:8081/v1' "${config_path}" || platform_ok=0
-    grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
-    grep -q 'Qwen3.6 27B Q4 + KV-Q8 (Local dense)' "${config_path}" || platform_ok=0
-    grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)' "${config_path}" || platform_ok=0
+    local ram_gb
+    ram_gb="$(detect_total_ram_gb)"
+    if [[ "${ram_gb}" -lt 64 ]]; then
+      # Single-instance Mac (< 64 GB): 35B-A3B on :8080, 128K context.
+      grep -q '"model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
+      grep -q '"small_model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
+      grep -q '"context": 131072' "${config_path}" || platform_ok=0
+      grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
+      grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local)' "${config_path}" || platform_ok=0
+    else
+      # Dual-instance Mac (>= 64 GB): 27B on :8081 + 35B-A3B on :8080.
+      grep -q '"model": "llamacpp/qwen-27b"' "${config_path}" || platform_ok=0
+      grep -q '"small_model": "llamacpp-moe/qwen-35b-a3b"' "${config_path}" || platform_ok=0
+      grep -q '"context": 262144' "${config_path}" || platform_ok=0
+      grep -q 'http://127.0.0.1:8081/v1' "${config_path}" || platform_ok=0
+      grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
+      grep -q 'Qwen3.6 27B Q4 + KV-Q8 (Local dense)' "${config_path}" || platform_ok=0
+      grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)' "${config_path}" || platform_ok=0
+    fi
   else
     grep -q '"model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
     grep -q '"context": 262144' "${config_path}" || platform_ok=0
@@ -213,6 +241,50 @@ test_opencode_config() {
   else
     echo "FAIL: OpenCode config missing expected fields (common=${common_ok} platform=${platform_ok})"
     cat "${config_path}"
+    return 1
+  fi
+}
+
+test_pi_config() {
+  echo "TEST: Pi llama.cpp config generation"
+  local home_dir="${TMPDIR}/home-pi"
+  local config_dir="${TMPDIR}/pi-agent"
+  mkdir -p "${home_dir}" "${config_dir}"
+
+  HOME="${home_dir}" \
+  PI_CODING_AGENT_DIR="${config_dir}" \
+  PI_SKIP_PRIVACY_ENV=true \
+  bash "${REPO_ROOT}/scripts/pi_set_llamacpp.sh" >/dev/null
+
+  local settings="${config_dir}/settings.json"
+  local models="${config_dir}/models.json"
+  local context_expected=262144
+  if [[ "$(uname -s)" == "Darwin" && "$(detect_total_ram_gb)" -lt 64 ]]; then
+    context_expected=131072
+  fi
+
+  local ok=1
+  grep -q '"defaultProvider": "llamacpp"' "${settings}" || ok=0
+  grep -q '"defaultModel": "qwen"' "${settings}" || ok=0
+  grep -q '"defaultThinkingLevel": "high"' "${settings}" || ok=0
+  grep -q '"enableInstallTelemetry": false' "${settings}" || ok=0
+  grep -q '"baseUrl": "http://127.0.0.1:8080/v1"' "${models}" || ok=0
+  grep -q '"api": "openai-completions"' "${models}" || ok=0
+  grep -q '"apiKey": "llamacpp"' "${models}" || ok=0
+  grep -q '"supportsDeveloperRole": false' "${models}" || ok=0
+  grep -q '"supportsReasoningEffort": false' "${models}" || ok=0
+  grep -q '"id": "qwen"' "${models}" || ok=0
+  grep -q '"text"' "${models}" || ok=0
+  grep -q '"image"' "${models}" || ok=0
+  grep -q "\"contextWindow\": ${context_expected}" "${models}" || ok=0
+  grep -q '"maxTokens": 16384' "${models}" || ok=0
+
+  if [[ "${ok}" == "1" ]]; then
+    echo "PASS: Pi config points at local llama.cpp with telemetry disabled"
+  else
+    echo "FAIL: Pi config missing expected fields"
+    cat "${settings}"
+    cat "${models}"
     return 1
   fi
 }
@@ -290,6 +362,7 @@ test_server_exec_mode() {
   echo "TEST: LLAMACPP_EXEC=true replaces the shell with llama-server"
   local home_dir="${TMPDIR}/home-exec"
   local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  local mmproj_path="${TMPDIR}/mmproj-exec.gguf"
   local stamp="${TMPDIR}/exec-args"
   mkdir -p "${home_dir}/.local/llama.cpp"
   cat > "${home_dir}/.local/llama.cpp/llama-server" <<EOF
@@ -299,10 +372,12 @@ exit 0
 EOF
   chmod +x "${home_dir}/.local/llama.cpp/llama-server"
   : > "${model_path}"
+  : > "${mmproj_path}"
 
   HOME="${home_dir}" \
   LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
   LLAMACPP_MODEL="${model_path}" \
+  LLAMACPP_MMPROJ="${mmproj_path}" \
   LLAMACPP_PORT=18084 \
   LLAMACPP_SMOKE_TEST=false \
   LLAMACPP_EXEC=true \
@@ -312,15 +387,24 @@ EOF
     echo "FAIL: exec-mode launcher did not invoke llama-server"
     return 1
   fi
+  local moe_ok=1
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # Mac: no MoE split (unified memory, Metal handles everything).
+    grep -qx -- '--n-cpu-moe' "${stamp}" && moe_ok=0
+  else
+    grep -qx -- '--n-cpu-moe' "${stamp}" || moe_ok=0
+    grep -qx -- '35' "${stamp}" || moe_ok=0
+  fi
   if grep -qx -- '-np' "${stamp}" \
     && grep -qx -- '1' "${stamp}" \
     && grep -qx -- '--port' "${stamp}" \
     && grep -qx -- '18084' "${stamp}" \
-    && grep -qx -- '--n-cpu-moe' "${stamp}" \
-    && grep -qx -- '35' "${stamp}" \
+    && grep -qx -- '--reasoning-budget' "${stamp}" \
+    && grep -qx -- "$(default_reasoning_budget)" "${stamp}" \
     && grep -qx -- '-ub' "${stamp}" \
-    && grep -qx -- '1024' "${stamp}"; then
-    echo "PASS: exec-mode argv has -np 1, -ub 1024, --n-cpu-moe 35"
+    && grep -qx -- '1024' "${stamp}" \
+    && [[ "${moe_ok}" == "1" ]]; then
+    echo "PASS: exec-mode argv has -np 1, -ub 1024, MoE flags correct"
   else
     echo "FAIL: exec-mode argv did not include expected flags"
     cat "${stamp}"
@@ -336,6 +420,7 @@ test_server_legacy_cpu_moe_fallback() {
   fi
   local home_dir="${TMPDIR}/home-legacymoe"
   local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  local mmproj_path="${TMPDIR}/mmproj-legacymoe.gguf"
   mkdir -p "${home_dir}/.local/llama.cpp"
   cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
 #!/usr/bin/env bash
@@ -343,12 +428,14 @@ exit 0
 EOF
   chmod +x "${home_dir}/.local/llama.cpp/llama-server"
   : > "${model_path}"
+  : > "${mmproj_path}"
 
   local output
   output="$(
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_MMPROJ="${mmproj_path}" \
     LLAMACPP_PORT=18086 \
     LLAMACPP_CPU_MOE=true \
     LLAMACPP_SMOKE_TEST=false \
@@ -405,6 +492,7 @@ test_server_start_thread_override || FAILED=$((FAILED + 1))
 test_server_exec_mode || FAILED=$((FAILED + 1))
 test_server_legacy_cpu_moe_fallback || FAILED=$((FAILED + 1))
 test_opencode_config || FAILED=$((FAILED + 1))
+test_pi_config || FAILED=$((FAILED + 1))
 test_models_default_alias || FAILED=$((FAILED + 1))
 test_setup_backend_selection || FAILED=$((FAILED + 1))
 test_install_linux_systemd_dry_run || FAILED=$((FAILED + 1))

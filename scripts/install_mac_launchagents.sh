@@ -8,8 +8,8 @@
 # com.devstral.llamacpp-local is present, it is booted out first.
 #
 # Env overrides:
-#   LLAMACPP_SERVER_BIN  llama-server path (default: $(command -v llama-server)
-#                        or ~/.local/llama.cpp/llama-server).
+#   LLAMACPP_SERVER_BIN  llama-server path (default: ~/.local/llama.cpp/
+#                        llama-server, falling back to PATH).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,16 +25,13 @@ mkdir -p "${AGENTS_DIR}" "${LOG_DIR_ABS}"
 
 SERVER_BIN="${LLAMACPP_SERVER_BIN:-}"
 if [[ -z "${SERVER_BIN}" ]]; then
-  if have llama-server; then
-    SERVER_BIN="$(command -v llama-server)"
-  elif [[ -x "${LLAMACPP_HOME}/llama-server" ]]; then
-    SERVER_BIN="${LLAMACPP_HOME}/llama-server"
-  else
+  if ! SERVER_BIN="$(resolve_llamacpp_server_bin)"; then
     die "llama-server not found. Run scripts/setup_llamacpp.sh or set LLAMACPP_SERVER_BIN"
   fi
 fi
 [[ -x "${SERVER_BIN}" ]] || die "not executable: ${SERVER_BIN}"
 SERVER_DIR="$(cd "$(dirname "${SERVER_BIN}")" && pwd)"
+REASONING_BUDGET="${LLAMACPP_REASONING_BUDGET:-$(default_reasoning_budget)}"
 
 resolve_model() {
   local alias="$1" path
@@ -101,6 +98,7 @@ write_plist() {
     <string>--presence-penalty</string><string>0.0</string>
     <string>--repeat-penalty</string><string>1.0</string>
     <string>--reasoning-format</string><string>deepseek</string>
+    <string>--reasoning-budget</string><string>${REASONING_BUDGET}</string>
     <string>--no-context-shift</string>
     <string>--reasoning</string><string>on</string>
     <string>--host</string><string>0.0.0.0</string>

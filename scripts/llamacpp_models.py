@@ -37,6 +37,7 @@ class ModelSpec:
     alias: str
     repo_id: str
     include: tuple[str, ...]
+    mmproj_include: tuple[str, ...] = ()
     default: bool = False
 
     @property
@@ -48,6 +49,7 @@ DEFAULT_SPEC = ModelSpec(
     alias="qwen3.6-35b-a3b-q4",
     repo_id="bartowski/Qwen_Qwen3.6-35B-A3B-GGUF",
     include=("*Q4_K_M*.gguf",),
+    mmproj_include=("mmproj-*f16.gguf", "mmproj-*F16.gguf"),
     default=True,
 )
 
@@ -73,21 +75,32 @@ def find_cli() -> str:
 
 
 def matching_files(model: ModelSpec) -> list[Path]:
+    return matching_paths(model, model.include)
+
+
+def matching_mmproj_files(model: ModelSpec) -> list[Path]:
+    return matching_paths(model, model.mmproj_include)
+
+
+def matching_paths(model: ModelSpec, patterns: tuple[str, ...]) -> list[Path]:
     files: list[Path] = []
+    if not patterns:
+        return files
     if model.cache_dir.exists():
         for path in sorted(model.cache_dir.rglob("*.gguf")):
             rel = path.relative_to(model.cache_dir).as_posix()
-            if any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(path.name, p) for p in model.include):
+            if any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(path.name, p) for p in patterns):
                 files.append(path)
     flat_prefix = model.repo_id.replace("/", "_") + "_"
     for path in sorted(CACHE_ROOT.glob(f"{flat_prefix}*.gguf")):
-        if any(fnmatch.fnmatch(path.name, f"{flat_prefix}{p}") or fnmatch.fnmatch(path.name, p) for p in model.include):
+        if any(fnmatch.fnmatch(path.name, f"{flat_prefix}{p}") or fnmatch.fnmatch(path.name, p) for p in patterns):
             files.append(path)
     return files
 
 
 def record(model: ModelSpec) -> dict:
     files = matching_files(model)
+    mmproj_files = matching_mmproj_files(model)
     return {
         "alias": model.alias,
         "repo_id": model.repo_id,
@@ -95,8 +108,11 @@ def record(model: ModelSpec) -> dict:
         "cache_dir": str(model.cache_dir),
         "present": bool(files),
         "files": [str(p) for p in files],
-        "size_bytes": sum(p.stat().st_size for p in files),
+        "mmproj_present": bool(mmproj_files),
+        "mmproj_files": [str(p) for p in mmproj_files],
+        "size_bytes": sum(p.stat().st_size for p in (*files, *mmproj_files)),
         "primary_path": str(files[0]) if files else "",
+        "mmproj_path": str(mmproj_files[0]) if mmproj_files else "",
     }
 
 
@@ -118,12 +134,15 @@ def cmd_inventory(args: argparse.Namespace) -> int:
 
 def download(model: ModelSpec) -> int:
     files = matching_files(model)
-    if files:
+    mmproj_files = matching_mmproj_files(model)
+    if files and (not model.mmproj_include or mmproj_files):
         print(f"{model.alias}: already present at {files[0]}")
+        if mmproj_files:
+            print(f"{model.alias}: mmproj present at {mmproj_files[0]}")
         return 0
     cli = find_cli()
     command = [cli, "download", model.repo_id, "--local-dir", str(model.cache_dir)]
-    for pattern in model.include:
+    for pattern in (*model.include, *model.mmproj_include):
         command.extend(["--include", pattern])
     print(f"downloading {model.alias} from {model.repo_id}")
     return subprocess.run(command, text=True).returncode
@@ -151,6 +170,19 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return 0 if rec["present"] else 1
 
 
+def cmd_resolve_mmproj(args: argparse.Namespace) -> int:
+    alias = args.alias or DEFAULT_SPEC.alias
+    if alias not in MODEL_BY_ALIAS:
+        print(f"unknown alias: {alias}", file=sys.stderr)
+        return 2
+    rec = record(MODEL_BY_ALIAS[alias])
+    if args.json:
+        print(json.dumps(rec, indent=2))
+    else:
+        print(rec["mmproj_path"])
+    return 0 if rec["mmproj_present"] else 1
+
+
 def cmd_default_alias(_args: argparse.Namespace) -> int:
     print(DEFAULT_SPEC.alias)
     return 0
@@ -172,6 +204,11 @@ def parse_args() -> argparse.Namespace:
     rs.add_argument("alias", nargs="?")
     rs.add_argument("--json", action="store_true")
     rs.set_defaults(func=cmd_resolve)
+
+    rm = sub.add_parser("resolve-mmproj", help="print the on-disk multimodal projector path for an alias")
+    rm.add_argument("alias", nargs="?")
+    rm.add_argument("--json", action="store_true")
+    rm.set_defaults(func=cmd_resolve_mmproj)
 
     da = sub.add_parser("default-alias", help="print the blessed default alias")
     da.set_defaults(func=cmd_default_alias)

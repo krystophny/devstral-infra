@@ -19,13 +19,19 @@ source "${SCRIPT_DIR}/_common.sh"
 PLATFORM="$(detect_platform)"
 HOST="${LLAMACPP_HOST:-127.0.0.1}"
 # Per-slot context = model's native n_ctx_train (262144) on every platform.
-# Mac runs -c 524288 -np 2 (two slots per instance). Linux/Windows run
-# -c 262144 -np 1 so the single client gets the full window; opencode auto-
+# Mac dual-instance runs -c 524288 -np 2 (two slots per instance). Linux/Windows
+# run -c 262144 -np 1 so the single client gets the full window; opencode auto-
 # compaction otherwise fires at ~79K with two slots (overflow buffer eats
-# ~52K of a 131K per-slot context).
+# ~52K of a 131K per-slot context). Single-instance MacBooks with ~32 GB use
+# 131072 (128K) to keep KV cache within available unified memory.
 CONTEXT_SIZE_DEFAULT=262144
+if [[ "$(detect_platform)" == "mac" ]]; then
+  ram_gb="$(detect_total_ram_gb)"
+  [[ "${ram_gb}" -lt 64 ]] && CONTEXT_SIZE_DEFAULT=131072
+fi
 CONTEXT_SIZE="${OPENCODE_LOCAL_CONTEXT:-${CONTEXT_SIZE_DEFAULT}}"
 OUTPUT_LIMIT="${OPENCODE_LOCAL_OUTPUT:-16384}"
+THINKING_BUDGET="${OPENCODE_LOCAL_THINKING_BUDGET:-$(default_reasoning_budget)}"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
 CONFIG_PATH="${OPENCODE_CONFIG_PATH:-${CONFIG_DIR}/opencode.json}"
@@ -39,7 +45,7 @@ fi
 
 sampler_opts() {
   cat <<EOF
-"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096
+"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": ${THINKING_BUDGET}
 EOF
 }
 
@@ -50,7 +56,9 @@ model_block() {
           "name": "${name}",
           "limit": {"context": ${CONTEXT_SIZE}, "output": ${OUTPUT_LIMIT}},
           "reasoning": true,
+          "attachment": true,
           "tool_call": true,
+          "modalities": {"input": ["text", "image"], "output": ["text"]},
           "options": {$(sampler_opts)}
         }
 EOF
@@ -95,11 +103,33 @@ $(model_block "qwen-35b-a3b" "Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)")
 EOF
 }
 
+# Mac dual-instance requires >= 64 GB unified memory. On smaller MacBooks the
+# 27B dense model and its KV cache don't fit alongside the 35B-A3B, so fall
+# back to single-instance (same config as Linux/Windows). Override with
+# OPENCODE_MAC_SINGLE=force|no if auto-detection is wrong.
+MAC_SINGLE=false
+if [[ "${PLATFORM}" == "mac" ]]; then
+  case "${OPENCODE_MAC_SINGLE:-}" in
+    force|true|1) MAC_SINGLE=true ;;
+    no|false|0)   MAC_SINGLE=false ;;
+    *)
+      ram_gb="$(detect_total_ram_gb)"
+      [[ "${ram_gb}" -lt 64 ]] && MAC_SINGLE=true
+      ;;
+  esac
+fi
+
 case "${PLATFORM}" in
   mac)
-    DEFAULT_MODEL="llamacpp/qwen-27b"
-    SMALL_MODEL="llamacpp-moe/qwen-35b-a3b"
-    PROVIDER_BLOCK="$(provider_block_dual_mac)"
+    if [[ "${MAC_SINGLE}" == "true" ]]; then
+      DEFAULT_MODEL="${OPENCODE_LOCAL_DEFAULT_MODEL:-llamacpp/qwen}"
+      SMALL_MODEL="${OPENCODE_LOCAL_SMALL_MODEL:-llamacpp/qwen}"
+      PROVIDER_BLOCK="$(provider_block_single 8080 qwen "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)")"
+    else
+      DEFAULT_MODEL="llamacpp/qwen-27b"
+      SMALL_MODEL="llamacpp-moe/qwen-35b-a3b"
+      PROVIDER_BLOCK="$(provider_block_dual_mac)"
+    fi
     DISABLED='"disabled_providers": ["exa", "opencode", "llmgateway", "github-copilot", "copilot", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"]'
     ;;
   *)
@@ -142,7 +172,11 @@ echo "- default model: ${DEFAULT_MODEL}"
 echo "- small model:   ${SMALL_MODEL}"
 case "${PLATFORM}" in
   mac)
-    echo "- providers: llamacpp -> :8081 (qwen-27b), llamacpp-moe -> :8080 (qwen-35b-a3b)"
+    if [[ "${MAC_SINGLE}" == "true" ]]; then
+      echo "- provider:  llamacpp -> :8080 (qwen) [single-instance, ${ram_gb} GB RAM]"
+    else
+      echo "- providers: llamacpp -> :8081 (qwen-27b), llamacpp-moe -> :8080 (qwen-35b-a3b)"
+    fi
     ;;
   *)
     echo "- provider:  llamacpp -> :8080 (qwen)"
@@ -150,3 +184,4 @@ case "${PLATFORM}" in
 esac
 echo "- title:      disabled"
 echo "- permission: allow"
+echo "- thinking budget: ${THINKING_BUDGET}"

@@ -12,9 +12,10 @@
 #   opencode/    unpacked opencode release for that OS
 #   install.sh or install.bat   copies into ~/.local/qwenstack and wires up a user service
 #   start.sh or start.bat       foreground launch for manual testing
+# The shared pi/ directory contains an npm offline cache and Pi package tarball.
 #
-# The model lives once at <out>/models/ (single 20 GB Q4_K_M GGUF) and is
-# referenced by every per-OS start script via a relative path.
+# The model and multimodal projector live once at <out>/models/ and are
+# referenced by every per-OS start script via relative paths.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,11 +25,14 @@ source "${SCRIPT_DIR}/_common.sh"
 have curl || die "curl is required"
 have unzip || die "unzip is required"
 have python3 || die "python3 is required"
+have node || die "node is required to build the Pi offline npm cache"
+have npm || die "npm is required to build the Pi offline npm cache"
 
 TARGETS=()
 OUT=""
 LLAMACPP_TAG="${LLAMACPP_TAG:-}"
 OPENCODE_TAG="${OPENCODE_TAG:-}"
+PI_VERSION="${PI_VERSION:-0.70.2}"
 SKIP_MODEL="${SKIP_MODEL:-false}"
 
 while [[ $# -gt 0 ]]; do
@@ -127,6 +131,65 @@ copy_model() {
   find "${src_dir}" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "${dst}/" \;
 }
 
+prepare_pi_npm_bundle() {
+  local pi_dir="${OUT}/pi"
+  local cache_dir="${pi_dir}/npm-cache"
+  local tmp
+  tmp="$(mktemp -d)"
+  rm -rf "${pi_dir}"
+  mkdir -p "${cache_dir}"
+
+  echo "preparing Pi npm offline cache (${PI_VERSION})"
+  (
+    cd "${tmp}"
+    cat > package.json <<EOF
+{"private":true,"dependencies":{"@mariozechner/pi-coding-agent":"${PI_VERSION}"}}
+EOF
+    npm install --package-lock-only --include=optional --cache "${cache_dir}" >/dev/null
+    python3 - <<'PY' > urls.txt
+import json
+data = json.load(open("package-lock.json"))
+urls = sorted({
+    pkg["resolved"]
+    for pkg in data.get("packages", {}).values()
+    if isinstance(pkg, dict) and str(pkg.get("resolved", "")).startswith("http")
+})
+print("\n".join(urls))
+PY
+    while IFS= read -r url; do
+      [[ -n "${url}" ]] || continue
+      npm cache add --cache "${cache_dir}" "${url}" >/dev/null
+    done < urls.txt
+  )
+
+  npm pack --pack-destination "${pi_dir}" \
+    "@mariozechner/pi-coding-agent@${PI_VERSION}" >/dev/null
+  cat > "${pi_dir}/install-unix.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PI_TELEMETRY=0
+export PI_SKIP_VERSION_CHECK=1
+npm install -g --offline --cache "${HERE}/npm-cache" \
+  "${HERE}"/mariozechner-pi-coding-agent-*.tgz
+EOF
+  chmod +x "${pi_dir}/install-unix.sh"
+  cat > "${pi_dir}/install-windows.bat" <<'EOF'
+@echo off
+setlocal
+set HERE=%~dp0
+set PI_TELEMETRY=0
+set PI_SKIP_VERSION_CHECK=1
+for %%F in ("%HERE%mariozechner-pi-coding-agent-*.tgz") do (
+  npm install -g --offline --cache "%HERE%npm-cache" "%%~fF"
+  exit /b %ERRORLEVEL%
+)
+echo Pi package tarball missing under %HERE%
+exit /b 1
+EOF
+  rm -rf "${tmp}"
+}
+
 build_linux_cuda() {
   local t="${OUT}/linux-cuda"
   mkdir -p "${t}/llama.cpp" "${t}/opencode"
@@ -140,13 +203,16 @@ build_linux_cuda() {
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
 
   install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
+  install -m 755 "${SCRIPT_DIR}/pi_privacy.sh" "${t}/pi_privacy.sh"
 
   cat > "${t}/start.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+MMPROJ="${HERE}/../models/mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf"
 [[ -f "${MODEL}" ]] || { ls "${HERE}/../models"; echo "model not found"; exit 1; }
+[[ -f "${MMPROJ}" ]] || { ls "${HERE}/../models"; echo "mmproj not found"; exit 1; }
 PHYS="$(lscpu -p=core 2>/dev/null | awk -F, '!/^#/ && NF {print $1}' | sort -u | wc -l | tr -d ' ')"
 [[ "${PHYS}" =~ ^[0-9]+$ && "${PHYS}" -ge 1 ]] || PHYS="$(nproc 2>/dev/null || echo 4)"
 THREADS=$(( PHYS - 2 ))
@@ -155,7 +221,8 @@ exec "${HERE}/llama.cpp/llama-server" \
   -m "${MODEL}" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
   -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe \
   --threads "${THREADS}" --threads-http 4 \
-  --alias qwen --jinja --reasoning-format deepseek \
+  --mmproj "${MMPROJ}" \
+  --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 \
   --host 127.0.0.1 --port 8080
 EOF
   chmod +x "${t}/start.sh"
@@ -175,6 +242,8 @@ find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "
 
 MODEL="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
 [[ -n "${MODEL}" ]] || { echo "model missing under ${DEST}/models"; exit 1; }
+MMPROJ="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf' -print -quit)"
+[[ -n "${MMPROJ}" ]] || { echo "mmproj missing under ${DEST}/models"; exit 1; }
 
 # Reserve 2 physical cores for the host so Claude Code / opencode / the DE
 # aren't starved during --cpu-moe decode. Baked into the unit at install
@@ -192,7 +261,7 @@ Description=qwenstack llama.cpp (Qwen3.6 35B A3B Q4)
 After=default.target
 
 [Service]
-ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads ${THREADS} --threads-http 4 --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
+ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} --mmproj ${MMPROJ} -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads ${THREADS} --threads-http 4 --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 --host 127.0.0.1 --port 8080
 Restart=on-failure
 RestartSec=5
 
@@ -241,7 +310,9 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
           "limit": {"context": 131072, "output": 16384},
           "reasoning": true,
+          "attachment": true,
           "tool_call": true,
+          "modalities": {"input": ["text", "image"], "output": ["text"]},
           "options": {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096}
         }
       }
@@ -251,6 +322,52 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 JSON
 
 bash "${HERE}/opencode_privacy.sh"
+bash "${HERE}/pi_privacy.sh"
+
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  echo "installing Pi Coding Agent from bundled npm cache..."
+  bash "${BUNDLE_ROOT}/pi/install-unix.sh"
+else
+  echo "note: node/npm not found; skipping Pi install"
+fi
+mkdir -p "${HOME}/.pi/agent"
+cat > "${HOME}/.pi/agent/settings.json" <<JSON
+{
+  "defaultProvider": "llamacpp",
+  "defaultModel": "qwen",
+  "defaultThinkingLevel": "high",
+  "enabledModels": ["llamacpp/qwen"],
+  "enableInstallTelemetry": false
+}
+JSON
+cat > "${HOME}/.pi/agent/models.json" <<JSON
+{
+  "providers": {
+    "llamacpp": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "llamacpp",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "qwen",
+          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local llama.cpp)",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 131072,
+          "maxTokens": 16384,
+          "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
+        }
+      ]
+    }
+  }
+}
+JSON
 
 mkdir -p "${HOME}/.local/bin"
 ln -sf "${DEST}/opencode/opencode" "${HOME}/.local/bin/opencode"
@@ -277,17 +394,21 @@ build_mac_m1() {
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
 
   install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
+  install -m 755 "${SCRIPT_DIR}/pi_privacy.sh" "${t}/pi_privacy.sh"
 
   cat > "${t}/start.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+MMPROJ="${HERE}/../models/mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf"
 [[ -f "${MODEL}" ]] || { ls "${HERE}/../models"; echo "model not found"; exit 1; }
+[[ -f "${MMPROJ}" ]] || { ls "${HERE}/../models"; echo "mmproj not found"; exit 1; }
 exec "${HERE}/llama.cpp/llama-server" \
   -m "${MODEL}" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
   -b 2048 -ub 512 -ngl 99 -fa on \
-  --alias qwen --jinja --reasoning-format deepseek \
+  --mmproj "${MMPROJ}" \
+  --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 \
   --host 127.0.0.1 --port 8080
 EOF
   chmod +x "${t}/start.sh"
@@ -308,6 +429,8 @@ find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "
 
 MODEL="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
 [[ -n "${MODEL}" ]] || { echo "model missing under ${DEST}/models"; exit 1; }
+MMPROJ="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf' -print -quit)"
+[[ -n "${MMPROJ}" ]] || { echo "mmproj missing under ${DEST}/models"; exit 1; }
 
 PLIST="${HOME}/Library/LaunchAgents/com.qwenstack.llamacpp.plist"
 cat > "${PLIST}" <<XML
@@ -322,6 +445,7 @@ cat > "${PLIST}" <<XML
   <array>
     <string>${DEST}/llama.cpp/llama-server</string>
     <string>-m</string><string>${MODEL}</string>
+    <string>--mmproj</string><string>${MMPROJ}</string>
     <string>-c</string><string>131072</string>
     <string>--cache-type-k</string><string>q8_0</string>
     <string>--cache-type-v</string><string>q8_0</string>
@@ -332,6 +456,7 @@ cat > "${PLIST}" <<XML
     <string>--alias</string><string>qwen</string>
     <string>--jinja</string>
     <string>--reasoning-format</string><string>deepseek</string>
+    <string>--reasoning-budget</string><string>4096</string>
     <string>--host</string><string>127.0.0.1</string>
     <string>--port</string><string>8080</string>
   </array>
@@ -366,7 +491,9 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
           "limit": {"context": 131072, "output": 16384},
           "reasoning": true,
+          "attachment": true,
           "tool_call": true,
+          "modalities": {"input": ["text", "image"], "output": ["text"]},
           "options": {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096}
         }
       }
@@ -376,6 +503,52 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 JSON
 
 bash "${HERE}/opencode_privacy.sh"
+bash "${HERE}/pi_privacy.sh"
+
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  echo "installing Pi Coding Agent from bundled npm cache..."
+  bash "${BUNDLE_ROOT}/pi/install-unix.sh"
+else
+  echo "note: node/npm not found; skipping Pi install"
+fi
+mkdir -p "${HOME}/.pi/agent"
+cat > "${HOME}/.pi/agent/settings.json" <<JSON
+{
+  "defaultProvider": "llamacpp",
+  "defaultModel": "qwen",
+  "defaultThinkingLevel": "high",
+  "enabledModels": ["llamacpp/qwen"],
+  "enableInstallTelemetry": false
+}
+JSON
+cat > "${HOME}/.pi/agent/models.json" <<JSON
+{
+  "providers": {
+    "llamacpp": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "llamacpp",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "qwen",
+          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local llama.cpp)",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 131072,
+          "maxTokens": 16384,
+          "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
+        }
+      ]
+    }
+  }
+}
+JSON
 
 mkdir -p "${HOME}/.local/bin"
 ln -sf "${DEST}/opencode/opencode" "${HOME}/.local/bin/opencode"
@@ -405,8 +578,14 @@ build_windows_arc() {
 setlocal EnableDelayedExpansion
 set HERE=%~dp0
 set MODEL=%HERE%..\models\Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
+set MMPROJ=%HERE%..\models\mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf
 if not exist "%MODEL%" (
   echo Model not found under %HERE%..\models
+  dir "%HERE%..\models"
+  exit /b 1
+)
+if not exist "%MMPROJ%" (
+  echo mmproj not found under %HERE%..\models
   dir "%HERE%..\models"
   exit /b 1
 )
@@ -423,10 +602,10 @@ if exist "%TEMP%\qwenstack_threads.txt" (
 if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
 if !THREADS! LSS 2 set THREADS=2
 "%HERE%llama.cpp\llama-server.exe" ^
-  -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 ^
+  -m "%MODEL%" --mmproj "%MMPROJ%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 ^
   -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe ^
   --threads !THREADS! --threads-http 2 ^
-  --alias qwen --jinja --reasoning-format deepseek ^
+  --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 ^
   --host 127.0.0.1 --port 8080
 EOF
 
@@ -456,8 +635,13 @@ xcopy /E /Y /I /Q "%HERE%opencode\*" "%DEST%\opencode\" >nul
 xcopy /Y /I /Q "%BUNDLE_ROOT%\models\*.gguf" "%DEST%\models\" >nul
 
 set MODEL=%DEST%\models\Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
+set MMPROJ=%DEST%\models\mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf
 if not exist "%MODEL%" (
   echo Model missing under %DEST%\models
+  exit /b 1
+)
+if not exist "%MMPROJ%" (
+  echo mmproj missing under %DEST%\models
   exit /b 1
 )
 
@@ -472,7 +656,7 @@ if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
 if !THREADS! LSS 2 set THREADS=2
 echo     using --threads !THREADS! --threads-http 2
 > "%DEST%\run-llamacpp.bat" echo @echo off
->> "%DEST%\run-llamacpp.bat" echo start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
+>> "%DEST%\run-llamacpp.bat" echo start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 --host 127.0.0.1 --port 8080
 
 echo [4/6] installing Startup shortcut at "%STARTUP%\qwenstack-llamacpp.bat"
 if not exist "%STARTUP%" mkdir "%STARTUP%"
@@ -501,7 +685,9 @@ if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >> "%OC_CFG%" echo           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
 >> "%OC_CFG%" echo           "limit": { "context": 131072, "output": 16384 },
 >> "%OC_CFG%" echo           "reasoning": true,
+>> "%OC_CFG%" echo           "attachment": true,
 >> "%OC_CFG%" echo           "tool_call": true,
+>> "%OC_CFG%" echo           "modalities": { "input": ["text", "image"], "output": ["text"] },
 >> "%OC_CFG%" echo           "options": { "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096 }
 >> "%OC_CFG%" echo         }
 >> "%OC_CFG%" echo       }
@@ -516,6 +702,53 @@ setx OPENCODE_DISABLE_MODELS_FETCH 1 >nul
 setx OPENCODE_DISABLE_LSP_DOWNLOAD 1 >nul
 setx OPENCODE_DISABLE_DEFAULT_PLUGINS 1 >nul
 setx OPENCODE_DISABLE_EMBEDDED_WEB_UI 1 >nul
+setx PI_TELEMETRY 0 >nul
+setx PI_SKIP_VERSION_CHECK 1 >nul
+
+where node >nul 2>nul
+set HAS_NODE=%ERRORLEVEL%
+where npm >nul 2>nul
+set HAS_NPM=%ERRORLEVEL%
+if "%HAS_NODE%%HAS_NPM%"=="00" (
+  echo Installing Pi Coding Agent from bundled npm cache...
+  call "%BUNDLE_ROOT%\pi\install-windows.bat"
+  if errorlevel 1 exit /b 1
+) else (
+  echo note: node/npm not found; skipping Pi install
+)
+
+set PI_CFG_DIR=%USERPROFILE%\.pi\agent
+if not exist "%PI_CFG_DIR%" mkdir "%PI_CFG_DIR%"
+set PI_SETTINGS=%PI_CFG_DIR%\settings.json
+set PI_MODELS=%PI_CFG_DIR%\models.json
+>  "%PI_SETTINGS%" echo {
+>> "%PI_SETTINGS%" echo   "defaultProvider": "llamacpp",
+>> "%PI_SETTINGS%" echo   "defaultModel": "qwen",
+>> "%PI_SETTINGS%" echo   "defaultThinkingLevel": "high",
+>> "%PI_SETTINGS%" echo   "enabledModels": ["llamacpp/qwen"],
+>> "%PI_SETTINGS%" echo   "enableInstallTelemetry": false
+>> "%PI_SETTINGS%" echo }
+>  "%PI_MODELS%" echo {
+>> "%PI_MODELS%" echo   "providers": {
+>> "%PI_MODELS%" echo     "llamacpp": {
+>> "%PI_MODELS%" echo       "baseUrl": "http://127.0.0.1:8080/v1",
+>> "%PI_MODELS%" echo       "api": "openai-completions",
+>> "%PI_MODELS%" echo       "apiKey": "llamacpp",
+>> "%PI_MODELS%" echo       "compat": { "supportsDeveloperRole": false, "supportsReasoningEffort": false, "supportsUsageInStreaming": false, "maxTokensField": "max_tokens" },
+>> "%PI_MODELS%" echo       "models": [
+>> "%PI_MODELS%" echo         {
+>> "%PI_MODELS%" echo           "id": "qwen",
+>> "%PI_MODELS%" echo           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local llama.cpp)",
+>> "%PI_MODELS%" echo           "reasoning": true,
+>> "%PI_MODELS%" echo           "input": ["text", "image"],
+>> "%PI_MODELS%" echo           "contextWindow": 131072,
+>> "%PI_MODELS%" echo           "maxTokens": 16384,
+>> "%PI_MODELS%" echo           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+>> "%PI_MODELS%" echo         }
+>> "%PI_MODELS%" echo       ]
+>> "%PI_MODELS%" echo     }
+>> "%PI_MODELS%" echo   }
+>> "%PI_MODELS%" echo }
 
 REM Idempotent prepend of the opencode dir to user PATH via PowerShell
 REM (reads HKCU\Environment directly so successive runs don't duplicate).
@@ -531,7 +764,7 @@ echo     (env vars and PATH take effect in new cmd/powershell windows, not this 
 
 echo.
 echo Starting the server now (will also auto-start at every logon)...
-start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --host 127.0.0.1 --port 8080
+start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 --host 127.0.0.1 --port 8080
 
 echo.
 echo OK. Wait ~30s for the model to load, then open a NEW command prompt
@@ -550,7 +783,8 @@ Three self-contained per-OS directories plus a shared models/ folder:
   linux-cuda/   NVIDIA GPU + Linux (install.sh, no sudo)
   mac-m1/       Apple Silicon Mac (install.sh, no sudo)
   windows-arc/  Intel Arc GPU + Windows, Vulkan backend (install.bat, no admin)
-  models/       Qwen3.6 35B A3B Q4_K_M (single GGUF, ~20 GB)
+  pi/           Pi Coding Agent npm tarball + offline npm cache
+  models/       Qwen3.6 35B A3B Q4_K_M + mmproj for vision input
 
 Requires exFAT formatting on the USB stick (FAT32 cannot hold the 20 GB
 GGUF; exFAT is natively mounted by Windows and macOS and supported by
@@ -563,13 +797,16 @@ To install on a target machine:
 
 The installer copies llama.cpp + opencode + the model into the user's
 home directory, registers a user-level service (systemd --user, launchd,
-or schtasks ONLOGON), writes an OpenCode config, and exits.
+or schtasks ONLOGON), writes OpenCode and Pi configs, and exits.
 
 Smoke test:
   curl -s http://127.0.0.1:8080/v1/models
 
-Then launch opencode from the bundle's opencode/ directory.
+Then launch opencode from the bundle's opencode/ directory, or pi if node/npm
+were installed and the bundled offline npm install succeeded.
 EOF
+
+prepare_pi_npm_bundle
 
 for t in "${TARGETS[@]}"; do
   case "${t}" in

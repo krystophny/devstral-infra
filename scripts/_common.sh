@@ -57,6 +57,28 @@ detect_arch() {
   esac
 }
 
+# Total physical RAM in GiB (rounded down). Used to decide single vs dual
+# instance on Mac and to size context windows.
+detect_total_ram_gb() {
+  local gb=""
+  case "$(uname -s)" in
+    Darwin)
+      local bytes
+      bytes="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
+      gb=$(( bytes / 1073741824 ))
+      ;;
+    Linux)
+      if [[ -r /proc/meminfo ]]; then
+        local kb
+        kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"
+        gb=$(( kb / 1048576 ))
+      fi
+      ;;
+  esac
+  [[ -z "${gb}" || "${gb}" -eq 0 ]] && gb=0
+  echo "${gb}"
+}
+
 pid_command() { ps -p "$1" -o command= 2>/dev/null || true; }
 port_listener_pids() { lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null || true; }
 
@@ -100,6 +122,25 @@ default_compute_threads() {
   threads=$(( phys - reserve ))
   [[ "${threads}" -lt 2 ]] && threads=2
   echo "${threads}"
+}
+
+default_reasoning_budget() {
+  echo 4096
+}
+
+resolve_llamacpp_server_bin() {
+  local server_exe="llama-server"
+  [[ "$(detect_platform)" == "windows" ]] && server_exe="llama-server.exe"
+
+  if [[ -n "${LLAMACPP_SERVER_BIN:-}" ]]; then
+    echo "${LLAMACPP_SERVER_BIN}"
+  elif [[ -x "${LLAMACPP_HOME}/${server_exe}" ]]; then
+    echo "${LLAMACPP_HOME}/${server_exe}"
+  elif have "${server_exe}"; then
+    command -v "${server_exe}"
+  else
+    return 1
+  fi
 }
 
 stop_pid() {
