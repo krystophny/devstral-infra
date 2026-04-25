@@ -10,12 +10,29 @@
 # Each target directory contains:
 #   llama.cpp/   unpacked upstream release for that OS/backend
 #   opencode/    unpacked opencode release for that OS
-#   install.sh or install.bat   copies into ~/.local/qwenstack and wires up a user service
+#   install.sh or install.bat   copies into ~/.local/devstral and registers a user service
 #   start.sh or start.bat       foreground launch for manual testing
 # The shared pi/ directory contains an npm offline cache and Pi package tarball.
 #
-# The model and multimodal projector live once at <out>/models/ and are
-# referenced by every per-OS start script via relative paths.
+# Models live once at <out>/models/ and are referenced by every per-OS start
+# script via relative paths:
+#   - Qwen3.6-35B-A3B-Q4_K_M.gguf            (~20 GB, all platforms)
+#   - mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf  (~1 GB, vision projector for the
+#                                             35B-A3B; image input on every
+#                                             platform)
+#   - Qwen3.6-27B-Q4_K_M.gguf                (~16 GB, Mac dual-instance only,
+#                                             text-only)
+#
+# Bundle profile mirrors production launchers (server_start_llamacpp.sh +
+# server_start_mac.sh + install_mac_launchagents.sh):
+#   Linux/Windows: single instance, alias qwen,           :8080,
+#                  -c 262144 -np 1 -ub 1024 --n-cpu-moe 35
+#                  --threads (physical-2) --threads-http 4
+#                  --mmproj  (image input via 35B-A3B vision projector)
+#   Mac:           two instances, 35B-A3B alias qwen-35b-a3b :8080 (--mmproj),
+#                                 27B     alias qwen-27b     :8081 (text only),
+#                  each -c 524288 -np 2 -ub 512  (no MoE split, no thread cap)
+# Every slot ends up at the model's native 256K window.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +60,7 @@ while [[ $# -gt 0 ]]; do
     --skip-model) SKIP_MODEL="true"; shift ;;
     all) TARGETS=(linux-cuda mac-m1 windows-arc); shift ;;
     linux-cuda|mac-m1|windows-arc) TARGETS+=("$1"); shift ;;
-    -h|--help) sed -n '1,25p' "$0"; exit 0 ;;
+    -h|--help) sed -n '1,30p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -52,6 +69,14 @@ done
 [[ "${#TARGETS[@]}" -gt 0 ]] || die "specify a target: linux-cuda|mac-m1|windows-arc|all"
 
 mkdir -p "${OUT}/models"
+
+WANT_27B="false"
+for t in "${TARGETS[@]}"; do
+  [[ "${t}" == "mac-m1" ]] && WANT_27B="true"
+done
+# Vision projector is needed by every platform that runs the 35B-A3B (i.e.
+# all of them). Build_bundle always copies it.
+WANT_MMPROJ="true"
 
 resolve_llamacpp_asset() {
   local flavor="$1"
@@ -111,24 +136,41 @@ fetch_archive() {
   # Flatten common outer wrapper dirs (e.g. "build/bin" or "llama-<tag>/").
   local inner
   inner="$(find "${tmp}/unpacked" -type f \( -name 'llama-server' -o -name 'llama-server.exe' -o -name 'opencode' -o -name 'opencode.exe' \) -print -quit | xargs -I{} dirname {} 2>/dev/null || true)"
+  # -L dereferences symlinks so bundles can live on exFAT USB sticks, which
+  # don't support symlinks. Cost: a few duplicated .so files, worth it for
+  # cross-platform stick compatibility.
   if [[ -n "${inner}" ]]; then
-    cp -R "${inner}/." "${dest}/"
+    cp -RL "${inner}/." "${dest}/"
   else
-    cp -R "${tmp}/unpacked/." "${dest}/"
+    cp -RL "${tmp}/unpacked/." "${dest}/"
   fi
   rm -rf "${tmp}"
 }
 
-copy_model() {
-  [[ "${SKIP_MODEL}" == "true" ]] && { echo "skip-model: leaving ${OUT}/models untouched"; return; }
-  local dst="${OUT}/models"
+copy_model_alias() {
+  local alias="$1" required="$2"
   local primary
-  primary="$(python3 "${SCRIPT_DIR}/llamacpp_models.py" resolve qwen3.6-35b-a3b-q4 2>/dev/null || true)"
-  [[ -n "${primary}" && -f "${primary}" ]] || die "blessed model not cached; run: python3 scripts/llamacpp_models.py prefetch"
+  primary="$(python3 "${SCRIPT_DIR}/llamacpp_models.py" resolve "${alias}" 2>/dev/null || true)"
+  if [[ -z "${primary}" || ! -f "${primary}" ]]; then
+    if [[ "${required}" == "true" ]]; then
+      die "model alias ${alias} not cached; run: python3 scripts/llamacpp_models.py prefetch ${alias}"
+    else
+      echo "skip: model alias ${alias} not cached (optional for selected targets)"
+      return 0
+    fi
+  fi
   local src_dir
   src_dir="$(dirname "${primary}")"
-  echo "copying model from ${src_dir} to ${dst}"
-  find "${src_dir}" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "${dst}/" \;
+  echo "copying ${alias} from ${src_dir} to ${OUT}/models/"
+  find "${src_dir}" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "${OUT}/models/" \;
+}
+
+copy_models() {
+  [[ "${SKIP_MODEL}" == "true" ]] && { echo "skip-model: leaving ${OUT}/models untouched"; return; }
+  copy_model_alias qwen3.6-35b-a3b-q4 true
+  if [[ "${WANT_27B}" == "true" ]]; then
+    copy_model_alias qwen3.6-27b-q4 true
+  fi
 }
 
 prepare_pi_npm_bundle() {
@@ -217,37 +259,44 @@ PHYS="$(lscpu -p=core 2>/dev/null | awk -F, '!/^#/ && NF {print $1}' | sort -u |
 [[ "${PHYS}" =~ ^[0-9]+$ && "${PHYS}" -ge 1 ]] || PHYS="$(nproc 2>/dev/null || echo 4)"
 THREADS=$(( PHYS - 2 ))
 [[ "${THREADS}" -lt 2 ]] && THREADS=2
+export LD_LIBRARY_PATH="${HERE}/llama.cpp${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 exec "${HERE}/llama.cpp/llama-server" \
-  -m "${MODEL}" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
-  -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe \
+  -m "${MODEL}" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 \
+  -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 \
   --threads "${THREADS}" --threads-http 4 \
   --mmproj "${MMPROJ}" \
-  --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 \
-  --host 127.0.0.1 --port 8080
+  --alias qwen --jinja \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 \
+  --presence-penalty 0.0 --repeat-penalty 1.0 \
+  --reasoning-format deepseek --reasoning-budget 4096 \
+  --no-context-shift --reasoning on \
+  --host 0.0.0.0 --port 8080
 EOF
   chmod +x "${t}/start.sh"
 
   cat > "${t}/install.sh" <<'EOF'
 #!/usr/bin/env bash
-# Install qwenstack into ~/.local/qwenstack and register a systemd --user service.
+# Install the local Qwen stack into ~/.local/devstral and register a
+# systemd --user service. No sudo required.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE_ROOT="$(cd "${HERE}/.." && pwd)"
-DEST="${HOME}/.local/qwenstack"
+DEST="${HOME}/.local/devstral"
 mkdir -p "${DEST}/llama.cpp" "${DEST}/opencode" "${DEST}/models"
 cp -R "${HERE}/llama.cpp/." "${DEST}/llama.cpp/"
 cp -R "${HERE}/opencode/." "${DEST}/opencode/"
 chmod +x "${DEST}/opencode/opencode" 2>/dev/null || true
-find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "${DEST}/models/" \;
+find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -exec cp -n {} "${DEST}/models/" \;
+find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf' -exec cp -n {} "${DEST}/models/" \;
 
 MODEL="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
 [[ -n "${MODEL}" ]] || { echo "model missing under ${DEST}/models"; exit 1; }
-MMPROJ="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf' -print -quit)"
+MMPROJ="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf' -print -quit)"
 [[ -n "${MMPROJ}" ]] || { echo "mmproj missing under ${DEST}/models"; exit 1; }
 
 # Reserve 2 physical cores for the host so Claude Code / opencode / the DE
-# aren't starved during --cpu-moe decode. Baked into the unit at install
-# time; re-run install.sh to re-detect after hardware changes.
+# aren't starved during MoE decode. Baked into the unit at install time;
+# re-run install.sh to re-detect after hardware changes.
 PHYS="$(lscpu -p=core 2>/dev/null | awk -F, '!/^#/ && NF {print $1}' | sort -u | wc -l | tr -d ' ')"
 [[ "${PHYS}" =~ ^[0-9]+$ && "${PHYS}" -ge 1 ]] || PHYS="$(nproc 2>/dev/null || echo 4)"
 THREADS=$(( PHYS - 2 ))
@@ -255,13 +304,14 @@ THREADS=$(( PHYS - 2 ))
 
 UNIT_DIR="${HOME}/.config/systemd/user"
 mkdir -p "${UNIT_DIR}"
-cat > "${UNIT_DIR}/qwenstack-llamacpp.service" <<UNIT
+cat > "${UNIT_DIR}/devstral-llamacpp.service" <<UNIT
 [Unit]
-Description=qwenstack llama.cpp (Qwen3.6 35B A3B Q4)
+Description=devstral llama.cpp (Qwen3.6 35B-A3B Q4)
 After=default.target
 
 [Service]
-ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} --mmproj ${MMPROJ} -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads ${THREADS} --threads-http 4 --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 --host 127.0.0.1 --port 8080
+Environment=LD_LIBRARY_PATH=${DEST}/llama.cpp
+ExecStart=${DEST}/llama.cpp/llama-server -m ${MODEL} --mmproj ${MMPROJ} -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads ${THREADS} --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=5
 
@@ -270,14 +320,15 @@ WantedBy=default.target
 UNIT
 
 systemctl --user daemon-reload
-systemctl --user enable --now qwenstack-llamacpp.service
+systemctl --user enable --now devstral-llamacpp.service
 
 # Linger lets the user's systemd instance (and therefore the llama.cpp
 # service) start at boot and survive logout, without needing root. On
 # most Arch/Ubuntu polkit setups self-linger works for the current user
-# without an admin password; if it doesn't, fall back to login-only.
+# without an admin password; if it doesn't, the service still starts at
+# the next interactive login.
 if loginctl enable-linger "${USER}" >/dev/null 2>&1; then
-  echo "linger enabled: qwenstack-llamacpp starts at boot"
+  echo "linger enabled: devstral-llamacpp starts at boot"
 else
   echo "note: could not enable-linger (polkit denied); service will start"
   echo "      at user login, not at boot. Run manually later with:"
@@ -285,7 +336,7 @@ else
 fi
 
 sleep 2
-systemctl --user status --no-pager qwenstack-llamacpp.service | head -15
+systemctl --user status --no-pager devstral-llamacpp.service | head -15
 
 mkdir -p "${HOME}/.config/opencode"
 cat > "${HOME}/.config/opencode/opencode.json" <<JSON
@@ -308,7 +359,7 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
       "models": {
         "qwen": {
           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
-          "limit": {"context": 131072, "output": 16384},
+          "limit": {"context": 262144, "output": 16384},
           "reasoning": true,
           "attachment": true,
           "tool_call": true,
@@ -359,7 +410,7 @@ cat > "${HOME}/.pi/agent/models.json" <<JSON
           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local llama.cpp)",
           "reasoning": true,
           "input": ["text", "image"],
-          "contextWindow": 131072,
+          "contextWindow": 262144,
           "maxTokens": 16384,
           "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
         }
@@ -396,84 +447,155 @@ build_mac_m1() {
   install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
   install -m 755 "${SCRIPT_DIR}/pi_privacy.sh" "${t}/pi_privacy.sh"
 
+  # Foreground manual launch: starts both 35B-A3B (8080) and 27B (8081).
   cat > "${t}/start.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODEL="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
-MMPROJ="${HERE}/../models/mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf"
-[[ -f "${MODEL}" ]] || { ls "${HERE}/../models"; echo "model not found"; exit 1; }
-[[ -f "${MMPROJ}" ]] || { ls "${HERE}/../models"; echo "mmproj not found"; exit 1; }
+MODEL_35B="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+MODEL_27B="${HERE}/../models/Qwen_Qwen3.6-27B-Q4_K_M.gguf"
+MMPROJ_35B="$(ls "${HERE}/../models"/mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf 2>/dev/null | head -1)"
+MMPROJ_27B="$(ls "${HERE}/../models"/mmproj-Qwen_Qwen3.6-27B-*.gguf 2>/dev/null | head -1)"
+[[ -f "${MODEL_35B}" ]] || { ls "${HERE}/../models"; echo "35B model not found"; exit 1; }
+[[ -f "${MODEL_27B}" ]] || { ls "${HERE}/../models"; echo "27B model not found"; exit 1; }
+[[ -f "${MMPROJ_35B}" ]] || { ls "${HERE}/../models"; echo "mmproj-35B-A3B not found"; exit 1; }
+[[ -f "${MMPROJ_27B}" ]] || { ls "${HERE}/../models"; echo "mmproj-27B not found"; exit 1; }
+export DYLD_LIBRARY_PATH="${HERE}/llama.cpp${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+"${HERE}/llama.cpp/llama-server" \
+  -m "${MODEL_35B}" --mmproj "${MMPROJ_35B}" \
+  -c 524288 --cache-type-k q8_0 --cache-type-v q8_0 \
+  -b 2048 -ub 512 -ngl 99 -fa on -np 2 \
+  --alias qwen-35b-a3b --jinja \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 \
+  --presence-penalty 0.0 --repeat-penalty 1.0 \
+  --reasoning-format deepseek --reasoning-budget 4096 \
+  --no-context-shift --reasoning on \
+  --host 0.0.0.0 --port 8080 &
+PID_35B=$!
+trap 'kill ${PID_35B} 2>/dev/null || true' EXIT
 exec "${HERE}/llama.cpp/llama-server" \
-  -m "${MODEL}" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
-  -b 2048 -ub 512 -ngl 99 -fa on \
-  --mmproj "${MMPROJ}" \
-  --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 \
-  --host 127.0.0.1 --port 8080
+  -m "${MODEL_27B}" --mmproj "${MMPROJ_27B}" \
+  -c 524288 --cache-type-k q8_0 --cache-type-v q8_0 \
+  -b 2048 -ub 512 -ngl 99 -fa on -np 2 \
+  --alias qwen-27b --jinja \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 \
+  --presence-penalty 0.0 --repeat-penalty 1.0 \
+  --reasoning-format deepseek --reasoning-budget 4096 \
+  --no-context-shift --reasoning on \
+  --host 0.0.0.0 --port 8081
 EOF
   chmod +x "${t}/start.sh"
 
   cat > "${t}/install.sh" <<'EOF'
 #!/usr/bin/env bash
-# Install qwenstack into ~/Library/Application Support/qwenstack and register
-# a launchd user agent. No sudo, no admin.
+# Install the dual-instance Qwen stack into ~/Library/Application Support/devstral
+# and register two launchd user agents (no sudo, no admin):
+#   com.devstral.llamacpp-35b-a3b -> Qwen3.6 35B-A3B Q4 (MoE) on :8080
+#   com.devstral.llamacpp-27b     -> Qwen3.6 27B    Q4 (dense) on :8081
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE_ROOT="$(cd "${HERE}/.." && pwd)"
-DEST="${HOME}/Library/Application Support/qwenstack"
-mkdir -p "${DEST}/llama.cpp" "${DEST}/opencode" "${DEST}/models" "${HOME}/Library/Logs/qwenstack"
+DEST="${HOME}/Library/Application Support/devstral"
+LOG_DIR="${HOME}/Library/Logs/devstral"
+AGENTS_DIR="${HOME}/Library/LaunchAgents"
+mkdir -p "${DEST}/llama.cpp" "${DEST}/opencode" "${DEST}/models" "${LOG_DIR}" "${AGENTS_DIR}"
 cp -R "${HERE}/llama.cpp/." "${DEST}/llama.cpp/"
 cp -R "${HERE}/opencode/." "${DEST}/opencode/"
 chmod +x "${DEST}/opencode/opencode" 2>/dev/null || true
-find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name '*.gguf' -exec cp -n {} "${DEST}/models/" \;
+find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -exec cp -n {} "${DEST}/models/" \;
+find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-27B-Q4_K_M*.gguf' -exec cp -n {} "${DEST}/models/" \;
+find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf' -exec cp -n {} "${DEST}/models/" \;
+find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-27B-*.gguf' -exec cp -n {} "${DEST}/models/" \;
 
-MODEL="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
-[[ -n "${MODEL}" ]] || { echo "model missing under ${DEST}/models"; exit 1; }
-MMPROJ="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf' -print -quit)"
-[[ -n "${MMPROJ}" ]] || { echo "mmproj missing under ${DEST}/models"; exit 1; }
+MODEL_35B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
+MODEL_27B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-27B-Q4_K_M*.gguf' -print -quit)"
+MMPROJ_35B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf' -print -quit)"
+MMPROJ_27B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-27B-*.gguf' -print -quit)"
+[[ -n "${MODEL_35B}" ]] || { echo "35B model missing under ${DEST}/models"; exit 1; }
+[[ -n "${MODEL_27B}" ]] || { echo "27B model missing under ${DEST}/models"; exit 1; }
+[[ -n "${MMPROJ_35B}" ]] || { echo "mmproj-35B-A3B missing under ${DEST}/models"; exit 1; }
+[[ -n "${MMPROJ_27B}" ]] || { echo "mmproj-27B missing under ${DEST}/models"; exit 1; }
 
-PLIST="${HOME}/Library/LaunchAgents/com.qwenstack.llamacpp.plist"
-cat > "${PLIST}" <<XML
+SERVER_BIN="${DEST}/llama.cpp/llama-server"
+SERVER_DIR="${DEST}/llama.cpp"
+
+bootout_legacy() {
+  local label="$1"
+  if launchctl list | awk '{print $3}' | grep -qx "${label}"; then
+    launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || launchctl unload "${AGENTS_DIR}/${label}.plist" 2>/dev/null || true
+  fi
+  rm -f "${AGENTS_DIR}/${label}.plist"
+}
+# Legacy single-instance labels from older bundles -> remove cleanly first.
+bootout_legacy com.qwenstack.llamacpp
+bootout_legacy com.devstral.llamacpp-local
+
+write_plist() {
+  local label="$1" port="$2" alias="$3" model="$4" instance="$5" mmproj="${6:-}"
+  local plist="${AGENTS_DIR}/${label}.plist"
+  local log="${LOG_DIR}/llamacpp-${instance}.log"
+  local mmproj_xml=""
+  if [[ -n "${mmproj}" ]]; then
+    mmproj_xml=$'\n    <string>--mmproj</string><string>'"${mmproj}"$'</string>'
+  fi
+  cat > "${plist}" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.qwenstack.llamacpp</string>
+  <key>Label</key><string>${label}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProgramArguments</key>
   <array>
-    <string>${DEST}/llama.cpp/llama-server</string>
-    <string>-m</string><string>${MODEL}</string>
-    <string>--mmproj</string><string>${MMPROJ}</string>
-    <string>-c</string><string>131072</string>
-    <string>--cache-type-k</string><string>q8_0</string>
-    <string>--cache-type-v</string><string>q8_0</string>
+    <string>${SERVER_BIN}</string>
+    <string>-m</string><string>${model}</string>${mmproj_xml}
+    <string>-c</string><string>524288</string>
     <string>-b</string><string>2048</string>
     <string>-ub</string><string>512</string>
     <string>-ngl</string><string>99</string>
     <string>-fa</string><string>on</string>
-    <string>--alias</string><string>qwen</string>
+    <string>-np</string><string>2</string>
+    <string>--cache-type-k</string><string>q8_0</string>
+    <string>--cache-type-v</string><string>q8_0</string>
+    <string>--alias</string><string>${alias}</string>
     <string>--jinja</string>
+    <string>--temp</string><string>0.6</string>
+    <string>--top-p</string><string>0.95</string>
+    <string>--top-k</string><string>20</string>
+    <string>--min-p</string><string>0</string>
+    <string>--presence-penalty</string><string>0.0</string>
+    <string>--repeat-penalty</string><string>1.0</string>
     <string>--reasoning-format</string><string>deepseek</string>
     <string>--reasoning-budget</string><string>4096</string>
-    <string>--host</string><string>127.0.0.1</string>
-    <string>--port</string><string>8080</string>
+    <string>--no-context-shift</string>
+    <string>--reasoning</string><string>on</string>
+    <string>--host</string><string>0.0.0.0</string>
+    <string>--port</string><string>${port}</string>
   </array>
-  <key>StandardOutPath</key><string>${HOME}/Library/Logs/qwenstack/llamacpp.log</string>
-  <key>StandardErrorPath</key><string>${HOME}/Library/Logs/qwenstack/llamacpp.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DYLD_LIBRARY_PATH</key><string>${SERVER_DIR}</string>
+  </dict>
+  <key>StandardOutPath</key><string>${log}</string>
+  <key>StandardErrorPath</key><string>${log}</string>
 </dict>
 </plist>
 XML
-launchctl unload "${PLIST}" 2>/dev/null || true
-launchctl load "${PLIST}"
+  launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "${plist}"
+  echo "loaded ${label} (port ${port}, alias ${alias})"
+}
+
+write_plist com.devstral.llamacpp-35b-a3b 8080 qwen-35b-a3b "${MODEL_35B}" 35b-a3b "${MMPROJ_35B}"
+write_plist com.devstral.llamacpp-27b     8081 qwen-27b     "${MODEL_27B}" 27b     "${MMPROJ_27B}"
 
 mkdir -p "${HOME}/.config/opencode"
 cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "llamacpp/qwen",
-  "small_model": "llamacpp/qwen",
+  "model": "llamacpp/qwen-27b",
+  "small_model": "llamacpp-moe/qwen-35b-a3b",
   "agent": {"title": {"disable": true}},
   "share": "disabled",
   "autoupdate": false,
@@ -484,12 +606,28 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp (Local)",
+      "name": "llama.cpp 27B (Local)",
+      "options": {"baseURL": "http://127.0.0.1:8081/v1"},
+      "models": {
+        "qwen-27b": {
+          "name": "Qwen3.6 27B Q4 + KV-Q8 (Local dense)",
+          "limit": {"context": 262144, "output": 16384},
+          "reasoning": true,
+          "attachment": true,
+          "tool_call": true,
+          "modalities": {"input": ["text", "image"], "output": ["text"]},
+          "options": {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096}
+        }
+      }
+    },
+    "llamacpp-moe": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "llama.cpp 35B-A3B (Local)",
       "options": {"baseURL": "http://127.0.0.1:8080/v1"},
       "models": {
-        "qwen": {
-          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
-          "limit": {"context": 131072, "output": 16384},
+        "qwen-35b-a3b": {
+          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)",
+          "limit": {"context": 262144, "output": 16384},
           "reasoning": true,
           "attachment": true,
           "tool_call": true,
@@ -540,7 +678,7 @@ cat > "${HOME}/.pi/agent/models.json" <<JSON
           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local llama.cpp)",
           "reasoning": true,
           "input": ["text", "image"],
-          "contextWindow": 131072,
+          "contextWindow": 262144,
           "maxTokens": 16384,
           "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
         }
@@ -556,6 +694,22 @@ case ":${PATH}:" in
   *":${HOME}/.local/bin:"*) ;;
   *) echo "note: add ~/.local/bin to PATH (export PATH=\"\${HOME}/.local/bin:\${PATH}\") to run 'opencode' directly." ;;
 esac
+
+echo
+echo "waiting for both endpoints (up to 900s each)..."
+wait_ready() {
+  local port="$1" deadline=$(( $(date +%s) + 900 ))
+  while : ; do
+    if curl -fsS "http://127.0.0.1:${port}/v1/models" >/dev/null 2>&1; then
+      echo "ready: http://127.0.0.1:${port}/v1"
+      return 0
+    fi
+    [[ $(date +%s) -ge ${deadline} ]] && { echo "timed out on port ${port}" >&2; return 1; }
+    sleep 2
+  done
+}
+wait_ready 8080 || true
+wait_ready 8081 || true
 
 echo "OK. New shell, then: opencode   (or: ${DEST}/opencode/opencode)"
 EOF
@@ -590,35 +744,36 @@ if not exist "%MMPROJ%" (
   exit /b 1
 )
 REM Reserve 2 physical cores for the host (Claude Code, opencode, DE) so
-REM --cpu-moe decode doesn't starve unrelated userspace and trip TCP idle
-REM timeouts. PowerShell reads physical core count; falls back to a
-REM logical-halved heuristic if PowerShell is absent.
+REM MoE decode doesn't starve unrelated userspace and trip TCP idle timeouts.
 set THREADS=
-powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\qwenstack_threads.txt" 2>nul
-if exist "%TEMP%\qwenstack_threads.txt" (
-  set /p THREADS=<"%TEMP%\qwenstack_threads.txt"
-  del "%TEMP%\qwenstack_threads.txt"
+powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\devstral_threads.txt" 2>nul
+if exist "%TEMP%\devstral_threads.txt" (
+  set /p THREADS=<"%TEMP%\devstral_threads.txt"
+  del "%TEMP%\devstral_threads.txt"
 )
 if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
 if !THREADS! LSS 2 set THREADS=2
 "%HERE%llama.cpp\llama-server.exe" ^
-  -m "%MODEL%" --mmproj "%MMPROJ%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 ^
-  -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe ^
-  --threads !THREADS! --threads-http 2 ^
-  --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 ^
-  --host 127.0.0.1 --port 8080
+  -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 ^
+  -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 ^
+  --threads !THREADS! --threads-http 4 ^
+  --alias qwen --jinja ^
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 ^
+  --presence-penalty 0.0 --repeat-penalty 1.0 ^
+  --reasoning-format deepseek --reasoning-budget 4096 ^
+  --no-context-shift --reasoning on ^
+  --host 0.0.0.0 --port 8080
 EOF
 
   cat > "${t}/install.bat" <<'EOF'
 @echo off
-REM Install qwenstack into %USERPROFILE%\qwenstack and register a Startup
-REM shortcut so the server launches at every logon. No admin, no UAC:
+REM Install the local Qwen stack into %USERPROFILE%\devstral and register a
+REM Startup shortcut so the server launches at every logon. No admin, no UAC:
 REM the Startup folder and %USERPROFILE% are always user-writable.
-REM Uses delayed expansion for !THREADS! at write time.
 setlocal EnableDelayedExpansion
 set HERE=%~dp0
 set BUNDLE_ROOT=%HERE%..
-set DEST=%USERPROFILE%\qwenstack
+set DEST=%USERPROFILE%\devstral
 set STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
 set OC_CFG_DIR=%USERPROFILE%\.config\opencode
 set OC_CFG=%OC_CFG_DIR%\opencode.json
@@ -632,7 +787,8 @@ if not exist "%DEST%\models" mkdir "%DEST%\models"
 echo [2/6] copying binaries and model (this takes a while for the GGUF)...
 xcopy /E /Y /I /Q "%HERE%llama.cpp\*" "%DEST%\llama.cpp\" >nul
 xcopy /E /Y /I /Q "%HERE%opencode\*" "%DEST%\opencode\" >nul
-xcopy /Y /I /Q "%BUNDLE_ROOT%\models\*.gguf" "%DEST%\models\" >nul
+xcopy /Y /I /Q "%BUNDLE_ROOT%\models\Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf" "%DEST%\models\" >nul
+xcopy /Y /I /Q "%BUNDLE_ROOT%\models\mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf" "%DEST%\models\" >nul
 
 set MODEL=%DEST%\models\Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
 set MMPROJ=%DEST%\models\mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf
@@ -647,20 +803,20 @@ if not exist "%MMPROJ%" (
 
 echo [3/6] detecting physical cores and writing %DEST%\run-llamacpp.bat
 set THREADS=
-powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\qwenstack_threads.txt" 2>nul
-if exist "%TEMP%\qwenstack_threads.txt" (
-  set /p THREADS=<"%TEMP%\qwenstack_threads.txt"
-  del "%TEMP%\qwenstack_threads.txt"
+powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\devstral_threads.txt" 2>nul
+if exist "%TEMP%\devstral_threads.txt" (
+  set /p THREADS=<"%TEMP%\devstral_threads.txt"
+  del "%TEMP%\devstral_threads.txt"
 )
 if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
 if !THREADS! LSS 2 set THREADS=2
-echo     using --threads !THREADS! --threads-http 2
+echo     using --threads !THREADS! --threads-http 4
 > "%DEST%\run-llamacpp.bat" echo @echo off
->> "%DEST%\run-llamacpp.bat" echo start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 --host 127.0.0.1 --port 8080
+>> "%DEST%\run-llamacpp.bat" echo start "devstral-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads !THREADS! --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
 
-echo [4/6] installing Startup shortcut at "%STARTUP%\qwenstack-llamacpp.bat"
+echo [4/6] installing Startup shortcut at "%STARTUP%\devstral-llamacpp.bat"
 if not exist "%STARTUP%" mkdir "%STARTUP%"
-copy /Y "%DEST%\run-llamacpp.bat" "%STARTUP%\qwenstack-llamacpp.bat" >nul
+copy /Y "%DEST%\run-llamacpp.bat" "%STARTUP%\devstral-llamacpp.bat" >nul
 
 echo [5/6] writing OpenCode config to %OC_CFG%
 if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
@@ -683,7 +839,7 @@ if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >> "%OC_CFG%" echo       "models": {
 >> "%OC_CFG%" echo         "qwen": {
 >> "%OC_CFG%" echo           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
->> "%OC_CFG%" echo           "limit": { "context": 131072, "output": 16384 },
+>> "%OC_CFG%" echo           "limit": { "context": 262144, "output": 16384 },
 >> "%OC_CFG%" echo           "reasoning": true,
 >> "%OC_CFG%" echo           "attachment": true,
 >> "%OC_CFG%" echo           "tool_call": true,
@@ -764,7 +920,7 @@ echo     (env vars and PATH take effect in new cmd/powershell windows, not this 
 
 echo.
 echo Starting the server now (will also auto-start at every logon)...
-start "qwenstack-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 512 -ngl 99 -fa on --cpu-moe --threads !THREADS! --threads-http 2 --alias qwen --jinja --reasoning-format deepseek --reasoning-budget 4096 --host 127.0.0.1 --port 8080
+start "devstral-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads !THREADS! --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
 
 echo.
 echo OK. Wait ~30s for the model to load, then open a NEW command prompt
@@ -775,19 +931,29 @@ EOF
 }
 
 cat > "${OUT}/README.txt" <<'EOF'
-qwenstack USB bundle
-====================
+devstral USB bundle (Qwen3.6 local stack)
+=========================================
 
 Three self-contained per-OS directories plus a shared models/ folder:
 
-  linux-cuda/   NVIDIA GPU + Linux (install.sh, no sudo)
+  linux-cuda/   Linux + Vulkan/CUDA GPU (install.sh, no sudo)
+                  -> single 35B-A3B :8080, 256K window, --n-cpu-moe 35,
+                     image input via mmproj
   mac-m1/       Apple Silicon Mac (install.sh, no sudo)
-  windows-arc/  Intel Arc GPU + Windows, Vulkan backend (install.bat, no admin)
+                  -> dual instance: 35B-A3B :8080 + 27B dense :8081,
+                     256K per slot (-c 524288 -np 2), both with image input
+  windows-arc/  Windows + Vulkan GPU (install.bat, no admin)
+                  -> single 35B-A3B :8080, 256K window, --n-cpu-moe 35,
+                     image input via mmproj
   pi/           Pi Coding Agent npm tarball + offline npm cache
-  models/       Qwen3.6 35B A3B Q4_K_M + mmproj for vision input
+  models/       Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf       (~20 GB, all platforms)
+                mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf (~1 GB,  vision projector,
+                                                       all platforms)
+                Qwen_Qwen3.6-27B-Q4_K_M.gguf          (~16 GB, Mac only)
+                mmproj-Qwen_Qwen3.6-27B-bf16.gguf     (~1 GB,  Mac only)
 
 Requires exFAT formatting on the USB stick (FAT32 cannot hold the 20 GB
-GGUF; exFAT is natively mounted by Windows and macOS and supported by
+GGUF; exFAT is mounted natively by Windows and macOS and supported by
 Linux kernels since 5.7).
 
 To install on a target machine:
@@ -795,12 +961,16 @@ To install on a target machine:
   Linux/Mac:   ./<target>/install.sh
   Windows:     .\windows-arc\install.bat
 
-The installer copies llama.cpp + opencode + the model into the user's
-home directory, registers a user-level service (systemd --user, launchd,
-or schtasks ONLOGON), writes OpenCode and Pi configs, and exits.
+The installer copies llama.cpp + opencode + the model(s) into the user's
+home directory, registers a user-level service (systemd --user, two
+launchd agents on Mac, or a Startup shortcut on Windows), runs the bundled
+offline npm install for the Pi Coding Agent, and writes OpenCode + Pi
+configs that disable every outbound network call beyond the local LLM
+endpoint. Image input is enabled wherever a vision projector is shipped.
 
 Smoke test:
   curl -s http://127.0.0.1:8080/v1/models
+  (Mac also: curl -s http://127.0.0.1:8081/v1/models)
 
 Then launch opencode from the bundle's opencode/ directory, or pi if node/npm
 were installed and the bundled offline npm install succeeded.
@@ -817,7 +987,7 @@ for t in "${TARGETS[@]}"; do
   esac
 done
 
-copy_model
+copy_models
 
 echo
 echo "bundle built at ${OUT}:"
