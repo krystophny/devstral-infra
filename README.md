@@ -1,4 +1,4 @@
-# devstral-infra
+# slopcode-infra
 
 Single-path local coding stack: **llama.cpp + Qwen3.6 35B A3B (Q4_K_M) + OpenCode + Pi**,
 packaged so a USB stick hands it to a Linux, macOS, or Windows machine with no

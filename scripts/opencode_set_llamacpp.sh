@@ -37,7 +37,7 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/opencode"
 CONFIG_PATH="${OPENCODE_CONFIG_PATH:-${CONFIG_DIR}/opencode.json}"
 mkdir -p "$(dirname "${CONFIG_PATH}")"
 
-BACKUP_PATH="${CONFIG_PATH}.devstral-infra.bak"
+BACKUP_PATH="${CONFIG_PATH}.slopcode-infra.bak"
 if [[ -f "${CONFIG_PATH}" && ! -f "${BACKUP_PATH}" ]]; then
   cp "${CONFIG_PATH}" "${BACKUP_PATH}"
   echo "backup: ${BACKUP_PATH}"

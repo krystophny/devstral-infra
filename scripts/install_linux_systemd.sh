@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the devstral-infra llama.cpp user service on Linux.
+# Install the slopcode-infra llama.cpp user service on Linux.
 #
 # Writes ~/.config/systemd/user/devstral-llamacpp.service, enables and starts
 # it, and (if polkit permits) enables loginctl linger so it survives logout
@@ -67,7 +67,7 @@ mkdir -p "${UNIT_DIR}" "${RUN_DIR}"
 
 cat > "${UNIT_FILE}" <<UNIT
 [Unit]
-Description=llama.cpp inference server (devstral-infra, ${DEFAULT_ALIAS})
+Description=llama.cpp inference server (slopcode-infra, ${DEFAULT_ALIAS})
 After=network.target
 
 [Service]
