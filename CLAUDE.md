@@ -169,6 +169,43 @@ box.
 Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`. The
 Mac orchestrator also accepts these and forwards them to both instances.
 
+## Whisper transcription server
+
+`whisper.cpp` runs alongside llama-server on the same box, exposing an
+OpenAI-compatible STT endpoint at `http://0.0.0.0:8427/v1/audio/transcriptions`.
+
+| Host  | Backend | Model                       | Port | Path                              | Daemon                      |
+| ----- | ------- | --------------------------- | ---- | --------------------------------- | --------------------------- |
+| macOS | Metal   | `ggml-large-v3-turbo.bin`   | 8427 | `/v1/audio/transcriptions`        | `com.slopcode.whisper-server` |
+| Linux | CUDA    | `ggml-large-v3-turbo.bin`   | 8427 | `/v1/audio/transcriptions`        | (systemd unit, future)      |
+
+Every instance launched through `server_start_whisper.sh` always passes:
+
+```
+-l auto -fa --inference-path /v1/audio/transcriptions --convert
+```
+
+`-l auto` means whisper auto-detects the spoken language (the default `en`
+silently produces nonsense on German voice memos). `-fa` enables flash
+attention (default-on; explicit so it survives upstream changes). `--convert`
+lets clients upload arbitrary container formats (m4a, mp3, mp4) and the server
+reaches for ffmpeg to decode — required because iOS Voice Memos are AAC-in-m4a.
+GPU usage is on by default; the binary is built with `-DGGML_METAL=1` on Mac,
+`-DGGML_CUDA=1` on Linux/NVIDIA, `-DGGML_VULKAN=1` on other GPUs. CPU-only
+falls through `setup_whisper.sh`'s safety check unless `WHISPER_ALLOW_CPU=1`
+is set.
+
+Clients in this stack:
+- `voxtype` macOS push-to-talk (`feature/macos-release`) with
+  `--remote-endpoint http://127.0.0.1:8427`
+- `~/Nextcloud/plasma/DOCUMENTS/MEETINGS/tools/transcribe-memo`
+- `slopbox` voice-memo classifier (uses the first ~60s of audio for the
+  is-meeting decision, then hands off to `process-memo` for the full transcribe)
+
+Override with `WHISPER_HOME`, `WHISPER_PORT`, `WHISPER_LANGUAGE`,
+`WHISPER_THREADS`, `WHISPER_MODEL`. Foreground-mode for launchd ExecStart with
+`WHISPER_EXEC=true` (mirrors `LLAMACPP_EXEC=true`).
+
 ## Don't reintroduce
 
 Explicitly out of scope — do not add LM Studio, vLLM, vLLM-MLX, MLX-LM, oMLX,
