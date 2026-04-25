@@ -54,7 +54,12 @@ DEFAULT_SPEC = ModelSpec(
 )
 
 OPTIONAL_SPECS: tuple[ModelSpec, ...] = (
-    ModelSpec("qwen3.6-27b-q4", "bartowski/Qwen_Qwen3.6-27B-GGUF", ("*Q4_K_M*.gguf",)),
+    ModelSpec(
+        alias="qwen3.6-27b-q4",
+        repo_id="bartowski/Qwen_Qwen3.6-27B-GGUF",
+        include=("*Q4_K_M*.gguf",),
+        mmproj_include=("mmproj-*f16.gguf", "mmproj-*F16.gguf"),
+    ),
     ModelSpec("qwen3.6-35b-a3b-q8", "unsloth/Qwen3.6-35B-A3B-GGUF", ("*Q8_0*.gguf",)),
     ModelSpec("qwen3.5-35b-a3b-q4", "unsloth/Qwen3.5-35B-A3B-GGUF", ("*Q4_K_M*.gguf",)),
     ModelSpec("qwen3.5-122b-a10b-q8", "lmstudio-community/Qwen3.5-122B-A10B-GGUF", ("*Q8_0*.gguf",)),
