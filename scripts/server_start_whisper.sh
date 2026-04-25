@@ -83,6 +83,10 @@ CMD=(
   -fa
   --inference-path "${INFERENCE_PATH}"
   --convert
+  # whisper-server writes the ffmpeg-decoded WAV next to its cwd before calling
+  # ffmpeg; under launchd cwd is / (read-only), so without an absolute --tmp-dir
+  # every transcription fails with "No such file or directory".
+  --tmp-dir /tmp
 )
 
 echo "starting whisper-server"

@@ -192,6 +192,11 @@ write_whisper_plist() {
     <string>-fa</string>
     <string>--inference-path</string><string>/v1/audio/transcriptions</string>
     <string>--convert</string>
+    <!-- whisper-server writes the ffmpeg-decoded WAV next to its cwd before
+         calling ffmpeg; launchd starts agents with cwd=/ which is read-only,
+         so without an explicit --tmp-dir every transcription fails with
+         "No such file or directory". -->
+    <string>--tmp-dir</string><string>/tmp</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
