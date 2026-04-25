@@ -253,6 +253,9 @@ chmod +x "${server}" 2>/dev/null || true
 
 echo "installed llama.cpp $(cat "${LLAMACPP_HOME}/VERSION") at ${LLAMACPP_HOME}"
 if [[ -x "${server}" ]]; then
+  # macOS uses DYLD_LIBRARY_PATH; Linux uses LD_LIBRARY_PATH. Set both so the
+  # post-install --version probe finds libllama-common.dylib / .so regardless.
+  DYLD_LIBRARY_PATH="${LLAMACPP_HOME}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" \
   LD_LIBRARY_PATH="${LLAMACPP_HOME}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
     "${server}" --version 2>&1 | head -5 || true
 fi
