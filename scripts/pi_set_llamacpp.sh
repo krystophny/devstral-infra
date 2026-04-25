@@ -63,7 +63,7 @@ def read_json(path):
     try:
         return json.loads(path.read_text())
     except json.JSONDecodeError:
-        backup = path.with_suffix(path.suffix + ".devstral-infra.bak")
+        backup = path.with_suffix(path.suffix + ".slopcode-infra.bak")
         backup.write_text(path.read_text())
         return {}
 

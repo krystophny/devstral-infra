@@ -4,12 +4,17 @@
 # settings.json keys it owns.
 set -euo pipefail
 
-MARK_BEGIN='# >>> devstral-infra pi privacy >>>'
-MARK_END='# <<< devstral-infra pi privacy <<<'
+MARK_BEGIN='# >>> slopcode-infra pi privacy >>>'
+MARK_END='# <<< slopcode-infra pi privacy <<<'
+# Legacy markers from when this project was named devstral-infra. Stripped
+# from existing rc files on first run after the rename so the rewrite stays
+# idempotent on already-bootstrapped hosts.
+LEGACY_MARK_BEGIN='# >>> devstral-infra pi privacy >>>'
+LEGACY_MARK_END='# <<< devstral-infra pi privacy <<<'
 
 SHELL_BLOCK=$(cat <<'EOF'
 # Disables Pi install/update telemetry and startup version checks. Managed by
-# devstral-infra/scripts/pi_privacy.sh. Do not edit by hand.
+# slopcode-infra/scripts/pi_privacy.sh. Do not edit by hand.
 export PI_TELEMETRY=0
 export PI_SKIP_VERSION_CHECK=1
 EOF
@@ -20,13 +25,18 @@ apply_shell_rc() {
   [[ -e "${target}" || "${target}" == "${HOME}/.profile" ]] || return 0
   [[ -e "${target}" ]] || : > "${target}"
 
-  python3 - "${target}" "${MARK_BEGIN}" "${MARK_END}" "${SHELL_BLOCK}" <<'PY'
+  python3 - "${target}" "${MARK_BEGIN}" "${MARK_END}" "${SHELL_BLOCK}" "${LEGACY_MARK_BEGIN}" "${LEGACY_MARK_END}" <<'PY'
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
 begin, end, body = sys.argv[2], sys.argv[3], sys.argv[4]
+legacy_begin, legacy_end = sys.argv[5], sys.argv[6]
 text = path.read_text() if path.exists() else ""
+if legacy_begin in text and legacy_end in text:
+    pre, rest = text.split(legacy_begin, 1)
+    _, post = rest.split(legacy_end, 1)
+    text = pre.rstrip() + ("\n\n" if pre.strip() else "") + post.lstrip()
 block = f"{begin}\n{body}\n{end}\n"
 if begin in text and end in text:
     pre, rest = text.split(begin, 1)
@@ -52,7 +62,7 @@ path = pathlib.Path(sys.argv[1])
 try:
     data = json.loads(path.read_text()) if path.exists() else {}
 except json.JSONDecodeError:
-    backup = path.with_suffix(path.suffix + ".devstral-infra.bak")
+    backup = path.with_suffix(path.suffix + ".slopcode-infra.bak")
     backup.write_text(path.read_text())
     data = {}
 data["enableInstallTelemetry"] = False

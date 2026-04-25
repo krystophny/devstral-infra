@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "========================================"
-echo "       devstral-infra Test Suite"
+echo "       slopcode-infra Test Suite"
 echo "========================================"
 
 FAILED=0
