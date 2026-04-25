@@ -134,7 +134,6 @@ ${mmproj_xml}    <string>-c</string><string>524288</string>
     <string>--reasoning-format</string><string>deepseek</string>
     <string>--reasoning-budget</string><string>${REASONING_BUDGET}</string>
     <string>--no-context-shift</string>
-    <string>--reasoning</string><string>on</string>
     <string>--host</string><string>0.0.0.0</string>
     <string>--port</string><string>${port}</string>
   </array>
