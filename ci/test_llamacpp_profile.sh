@@ -258,31 +258,44 @@ test_pi_config() {
 
   local settings="${config_dir}/settings.json"
   local models="${config_dir}/models.json"
-  local context_expected=262144
-  if [[ "$(uname -s)" == "Darwin" && "$(detect_total_ram_gb)" -lt 64 ]]; then
-    context_expected=131072
+
+  local common_ok=1
+  grep -q '"defaultProvider": "llamacpp"' "${settings}" || common_ok=0
+  grep -q '"defaultThinkingLevel": "high"' "${settings}" || common_ok=0
+  grep -q '"enableInstallTelemetry": false' "${settings}" || common_ok=0
+  grep -q '"api": "openai-completions"' "${models}" || common_ok=0
+  grep -q '"apiKey": "llamacpp"' "${models}" || common_ok=0
+  grep -q '"supportsDeveloperRole": false' "${models}" || common_ok=0
+  grep -q '"supportsReasoningEffort": false' "${models}" || common_ok=0
+  grep -q '"image"' "${models}" || common_ok=0
+  grep -q '"maxTokens": 16384' "${models}" || common_ok=0
+
+  local platform_ok=1
+  if [[ "$(uname -s)" == "Darwin" && "$(detect_total_ram_gb)" -ge 64 ]]; then
+    # Dual-instance Mac: 27B default on :8081, 35B-A3B with image on :8080.
+    grep -q '"defaultModel": "qwen-27b"' "${settings}" || platform_ok=0
+    grep -q '"llamacpp/qwen-27b"' "${settings}" || platform_ok=0
+    grep -q '"llamacpp-moe/qwen-35b-a3b"' "${settings}" || platform_ok=0
+    grep -q '"baseUrl": "http://127.0.0.1:8081/v1"' "${models}" || platform_ok=0
+    grep -q '"baseUrl": "http://127.0.0.1:8080/v1"' "${models}" || platform_ok=0
+    grep -q '"id": "qwen-27b"' "${models}" || platform_ok=0
+    grep -q '"id": "qwen-35b-a3b"' "${models}" || platform_ok=0
+    grep -q '"contextWindow": 262144' "${models}" || platform_ok=0
+  else
+    local context_expected=262144
+    if [[ "$(uname -s)" == "Darwin" && "$(detect_total_ram_gb)" -lt 64 ]]; then
+      context_expected=131072
+    fi
+    grep -q '"defaultModel": "qwen"' "${settings}" || platform_ok=0
+    grep -q '"baseUrl": "http://127.0.0.1:8080/v1"' "${models}" || platform_ok=0
+    grep -q '"id": "qwen"' "${models}" || platform_ok=0
+    grep -q "\"contextWindow\": ${context_expected}" "${models}" || platform_ok=0
   fi
 
-  local ok=1
-  grep -q '"defaultProvider": "llamacpp"' "${settings}" || ok=0
-  grep -q '"defaultModel": "qwen"' "${settings}" || ok=0
-  grep -q '"defaultThinkingLevel": "high"' "${settings}" || ok=0
-  grep -q '"enableInstallTelemetry": false' "${settings}" || ok=0
-  grep -q '"baseUrl": "http://127.0.0.1:8080/v1"' "${models}" || ok=0
-  grep -q '"api": "openai-completions"' "${models}" || ok=0
-  grep -q '"apiKey": "llamacpp"' "${models}" || ok=0
-  grep -q '"supportsDeveloperRole": false' "${models}" || ok=0
-  grep -q '"supportsReasoningEffort": false' "${models}" || ok=0
-  grep -q '"id": "qwen"' "${models}" || ok=0
-  grep -q '"text"' "${models}" || ok=0
-  grep -q '"image"' "${models}" || ok=0
-  grep -q "\"contextWindow\": ${context_expected}" "${models}" || ok=0
-  grep -q '"maxTokens": 16384' "${models}" || ok=0
-
-  if [[ "${ok}" == "1" ]]; then
+  if [[ "${common_ok}" == "1" && "${platform_ok}" == "1" ]]; then
     echo "PASS: Pi config points at local llama.cpp with telemetry disabled"
   else
-    echo "FAIL: Pi config missing expected fields"
+    echo "FAIL: Pi config missing expected fields (common=${common_ok} platform=${platform_ok})"
     cat "${settings}"
     cat "${models}"
     return 1
