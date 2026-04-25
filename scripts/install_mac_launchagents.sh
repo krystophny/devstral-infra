@@ -197,6 +197,11 @@ write_whisper_plist() {
   <key>EnvironmentVariables</key>
   <dict>
     <key>DYLD_LIBRARY_PATH</key><string>${whisper_dir}</string>
+    <!-- whisper-server shells out to ffmpeg (--convert) to decode m4a/mp3/etc.
+         launchd starts agents with a minimal PATH that excludes Homebrew, so
+         ffmpeg is unfindable without this. Mirror the user's interactive shell
+         path. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StandardOutPath</key><string>${log}</string>
   <key>StandardErrorPath</key><string>${log}</string>
