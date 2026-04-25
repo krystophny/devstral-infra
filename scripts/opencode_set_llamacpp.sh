@@ -140,6 +140,29 @@ case "${PLATFORM}" in
     ;;
 esac
 
+# MCP servers: opencode talks to the two local MCP servers used by every
+# slopcode/sloppy box. sloppy at :9420 owns mail (Gmail / TU Graz EWS), full
+# CRUD calendar/contacts/tasks, workspace items/artifacts, slopshell canvas,
+# and agent handoffs. helpy at :8090 owns SearXNG web search/fetch, TUGonline,
+# ICS feeds, xlsx via excelize, Nextcloud shares + version history, and SAP
+# OData. Both are local-only (127.0.0.1), no outbound traffic. Slopbox and the
+# meeting-notes generator rely on these for full meeting context.
+MCP_BLOCK=$(cat <<'JSON'
+  "mcp": {
+    "sloppy": {
+      "type": "remote",
+      "url": "http://127.0.0.1:9420/mcp",
+      "enabled": true
+    },
+    "helpy": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8090/mcp",
+      "enabled": true
+    }
+  },
+JSON
+)
+
 cat > "${CONFIG_PATH}" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
@@ -157,6 +180,7 @@ cat > "${CONFIG_PATH}" <<EOF
   "experimental": {
     "openTelemetry": false
   },
+${MCP_BLOCK}
   ${DISABLED},
 ${PROVIDER_BLOCK}
 }
@@ -185,3 +209,4 @@ esac
 echo "- title:      disabled"
 echo "- permission: allow"
 echo "- thinking budget: ${THINKING_BUDGET}"
+echo "- mcp servers: sloppy -> http://127.0.0.1:9420/mcp, helpy -> http://127.0.0.1:8090/mcp"
