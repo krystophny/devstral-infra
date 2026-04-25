@@ -168,7 +168,6 @@ case "${MODEL_ALIAS}" in
       --temp 1.0
       --top-p 0.95
       --top-k 40
-      --reasoning on
     )
     ;;
   *)
@@ -182,7 +181,6 @@ case "${MODEL_ALIAS}" in
       --reasoning-format deepseek
       --reasoning-budget "${REASONING_BUDGET}"
       --no-context-shift
-      --reasoning on
     )
     ;;
 esac

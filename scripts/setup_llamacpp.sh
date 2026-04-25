@@ -5,17 +5,24 @@
 #   prebuilt     fetch the upstream ggml-org release asset for this platform.
 #                macOS gets macos-${ARCH}; Linux/Windows default to the portable
 #                Vulkan build (upstream ships CUDA only for Windows).
-#   cuda-source build llama.cpp from the matching git tag with -DGGML_CUDA=ON.
+#   mac-source   build llama.cpp from a git ref (default master) with
+#                -DGGML_METAL=1. Auto-selected on Mac so the binary tracks
+#                upstream main and the flag set matches the README/help.
+#                Pin to a tag with LLAMACPP_REF=bN if reproducibility is needed.
+#   cuda-source build llama.cpp from the matching git ref with -DGGML_CUDA=ON.
 #                Auto-selected on Linux when nvidia-smi + nvcc + cmake + ninja +
 #                git are all present; gets ~2x throughput vs Vulkan on NVIDIA
 #                and removes the inter-token stalls that trigger opencode
 #                ECONNRESETs.
-#   auto         pick cuda-source on Linux with CUDA, else prebuilt.
+#   auto         mac-source on Mac, cuda-source on Linux+CUDA, else prebuilt.
 #
 # Env overrides:
 #   LLAMACPP_HOME         target install dir (default ~/.local/llama.cpp)
-#   LLAMACPP_TAG          pin to a specific release tag (default: latest)
-#   LLAMACPP_BACKEND      auto | prebuilt | cuda-source (default auto)
+#   LLAMACPP_TAG          pin to a specific release tag (default: latest;
+#                         only consulted by the prebuilt backend)
+#   LLAMACPP_REF          git ref for source builds (default master; can be
+#                         a tag, branch, or commit sha)
+#   LLAMACPP_BACKEND      auto | prebuilt | mac-source | cuda-source (default auto)
 #   LLAMACPP_FLAVOR       prebuilt asset override (e.g. ubuntu-vulkan-x64)
 #   LLAMACPP_CMAKE_EXTRA  extra flags appended to cmake configure (cuda-source)
 set -euo pipefail
@@ -33,7 +40,9 @@ GPU="$(detect_gpu)"
 
 BACKEND="${LLAMACPP_BACKEND:-auto}"
 if [[ "${BACKEND}" == "auto" ]]; then
-  if [[ "${PLATFORM}" == "linux" && "${GPU}" == "cuda" ]] \
+  if [[ "${PLATFORM}" == "mac" ]] && have cmake && have ninja && have git; then
+    BACKEND="mac-source"
+  elif [[ "${PLATFORM}" == "linux" && "${GPU}" == "cuda" ]] \
       && have nvcc && have cmake && have ninja && have git; then
     BACKEND="cuda-source"
   else
@@ -42,22 +51,30 @@ if [[ "${BACKEND}" == "auto" ]]; then
 fi
 
 case "${BACKEND}" in
-  prebuilt|cuda-source) ;;
+  prebuilt|mac-source|cuda-source) ;;
   *) die "unknown LLAMACPP_BACKEND: ${BACKEND}" ;;
 esac
 
-API="https://api.github.com/repos/ggml-org/llama.cpp/releases"
-if [[ -n "${LLAMACPP_TAG:-}" ]]; then
-  release_url="${API}/tags/${LLAMACPP_TAG}"
-else
-  release_url="${API}/latest"
-fi
+LLAMACPP_REF="${LLAMACPP_REF:-master}"
 
-echo "resolving llama.cpp release (${release_url})..."
-release_json="$(curl -fsSL "${release_url}")"
-TAG="$(printf '%s' "${release_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
-echo "tag:     ${TAG}"
+# The release-tag resolution is only meaningful for the prebuilt backend (which
+# downloads a release asset). Source backends pull a git ref directly, so we
+# skip the GitHub API call there.
+TAG=""
+if [[ "${BACKEND}" == "prebuilt" ]]; then
+  API="https://api.github.com/repos/ggml-org/llama.cpp/releases"
+  if [[ -n "${LLAMACPP_TAG:-}" ]]; then
+    release_url="${API}/tags/${LLAMACPP_TAG}"
+  else
+    release_url="${API}/latest"
+  fi
+  echo "resolving llama.cpp release (${release_url})..."
+  release_json="$(curl -fsSL "${release_url}")"
+  TAG="$(printf '%s' "${release_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+  echo "tag:     ${TAG}"
+fi
 echo "backend: ${BACKEND}"
+[[ "${BACKEND}" =~ -source$ ]] && echo "ref:     ${LLAMACPP_REF}"
 
 mkdir -p "${LLAMACPP_HOME}"
 tmpdir="$(mktemp -d)"
@@ -169,8 +186,64 @@ install_cuda_source() {
   printf '%s+cuda\n' "${TAG}" > "${LLAMACPP_HOME}/VERSION"
 }
 
+install_mac_source() {
+  [[ "${PLATFORM}" == "mac" ]] || die "mac-source backend only supported on macOS"
+  have cmake || die "cmake is required for mac-source backend (brew install cmake)"
+  have ninja || die "ninja is required for mac-source backend (brew install ninja)"
+  have git   || die "git is required"
+
+  local src="${tmpdir}/llama.cpp"
+  local build="${tmpdir}/build"
+  local install="${tmpdir}/install"
+
+  echo "cloning ggml-org/llama.cpp @ ${LLAMACPP_REF}..."
+  git clone --depth 1 --branch "${LLAMACPP_REF}" \
+    https://github.com/ggml-org/llama.cpp.git "${src}" 2>&1 | tail -2
+  local head_sha
+  head_sha="$(git -C "${src}" rev-parse HEAD)"
+
+  echo "configuring (GGML_METAL=ON)..."
+  cmake -S "${src}" -B "${build}" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="${install}" \
+    -DBUILD_SHARED_LIBS=ON \
+    -DGGML_METAL=ON \
+    -DGGML_NATIVE=ON \
+    -DLLAMA_CURL=ON \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DLLAMA_BUILD_EXAMPLES=OFF \
+    ${LLAMACPP_CMAKE_EXTRA:-} >"${tmpdir}/cmake-configure.log" 2>&1 \
+      || { tail -40 "${tmpdir}/cmake-configure.log" >&2; die "cmake configure failed"; }
+
+  echo "building (this takes a few minutes)..."
+  cmake --build "${build}" -j"$(detect_physical_cores)" >"${tmpdir}/cmake-build.log" 2>&1 \
+    || { tail -40 "${tmpdir}/cmake-build.log" >&2; die "cmake build failed"; }
+
+  echo "installing..."
+  cmake --install "${build}" >"${tmpdir}/cmake-install.log" 2>&1 \
+    || { tail -40 "${tmpdir}/cmake-install.log" >&2; die "cmake install failed"; }
+
+  # Flatten bin/ + lib/ into LLAMACPP_HOME (matches prebuilt layout).
+  find "${LLAMACPP_HOME}" -mindepth 1 -maxdepth 1 \
+    \( -name 'llama-*' -o -name 'lib*.dylib*' -o -name 'VERSION' \
+       -o -name 'ggml-metal*' -o -name '*.metallib' \) -exec rm -rf {} +
+  mkdir -p "${LLAMACPP_HOME}"
+  cp "${install}/bin/llama-server" "${LLAMACPP_HOME}/"
+  local libdir="${install}/lib"
+  [[ -d "${libdir}" ]] || die "${install}/lib missing"
+  find "${libdir}" -maxdepth 1 \( -name 'lib*.dylib' -o -name 'lib*.dylib.*' \) \
+    -exec cp -P {} "${LLAMACPP_HOME}/" \;
+  # ggml-metal.metallib (the precompiled Metal shaders) lives next to the
+  # binary; without it llama-server fails to launch the Metal backend.
+  find "${install}" \( -name 'ggml-metal*.metallib' -o -name 'default.metallib' \) \
+    -exec cp {} "${LLAMACPP_HOME}/" \; 2>/dev/null || true
+
+  printf '%s+metal (%s)\n' "${LLAMACPP_REF}" "${head_sha:0:12}" > "${LLAMACPP_HOME}/VERSION"
+}
+
 case "${BACKEND}" in
   prebuilt)    install_prebuilt ;;
+  mac-source)  install_mac_source ;;
   cuda-source) install_cuda_source ;;
 esac
 
