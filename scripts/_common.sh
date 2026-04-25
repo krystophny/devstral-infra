@@ -125,7 +125,10 @@ default_compute_threads() {
 }
 
 default_reasoning_budget() {
-  echo 4096
+  # llama.cpp removed the numeric --reasoning-budget cap in late 2026; only
+  # -1 (unrestricted) and 0 (disable thinking) are accepted now. Default to
+  # unrestricted; set LLAMACPP_REASONING_BUDGET=0 to disable thinking entirely.
+  echo "-1"
 }
 
 resolve_llamacpp_server_bin() {
