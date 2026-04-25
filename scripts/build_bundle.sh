@@ -2,7 +2,7 @@
 # Build a USB-ready directory tree for one or more target OSes.
 #
 # Usage:
-#   scripts/build_bundle.sh all --out /tmp/qwenstack
+#   scripts/build_bundle.sh all --out /tmp/slopcode
 #   scripts/build_bundle.sh linux-cuda --out /mnt/usb
 #   scripts/build_bundle.sh windows-arc --out /mnt/usb
 #   scripts/build_bundle.sh mac-m1 --out /mnt/usb
@@ -10,7 +10,7 @@
 # Each target directory contains:
 #   llama.cpp/   unpacked upstream release for that OS/backend
 #   opencode/    unpacked opencode release for that OS
-#   install.sh or install.bat   copies into ~/.local/devstral and registers a user service
+#   install.sh or install.bat   copies into ~/.local/slopcode and registers a user service
 #   start.sh or start.bat       foreground launch for manual testing
 # The shared pi/ directory contains an npm offline cache and Pi package tarball.
 #
@@ -20,19 +20,19 @@
 #   - mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf  (~1 GB, vision projector for the
 #                                             35B-A3B; image input on every
 #                                             platform)
-#   - Qwen3.6-27B-Q4_K_M.gguf                (~16 GB, Mac dual-instance only,
-#                                             text-only)
 #
 # Bundle profile mirrors production launchers (server_start_llamacpp.sh +
-# server_start_mac.sh + install_mac_launchagents.sh):
-#   Linux/Windows: single instance, alias qwen,           :8080,
+# install_macbook_launchagent.sh):
+#   Linux/Windows: single instance, alias qwen, :8080,
 #                  -c 262144 -np 1 -ub 1024 --n-cpu-moe 35
 #                  --threads (physical-2) --threads-http 4
 #                  --mmproj  (image input via 35B-A3B vision projector)
-#   Mac:           two instances, 35B-A3B alias qwen-35b-a3b :8080 (--mmproj),
-#                                 27B     alias qwen-27b     :8081 (text only),
-#                  each -c 524288 -np 2 -ub 512  (no MoE split, no thread cap)
-# Every slot ends up at the model's native 256K window.
+#   Mac:           single instance, alias qwen, :8080,
+#                  -c 131072 -np 1 -ub 1024 (Metal, no MoE split, no thread cap)
+#                  --mmproj  (image input via 35B-A3B vision projector)
+# The Mac Studio dual-instance deployment (with the 27B dense companion)
+# is set up directly from the repo via install_mac_launchagents.sh and is
+# intentionally not part of this USB bundle.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,10 +70,6 @@ done
 
 mkdir -p "${OUT}/models"
 
-WANT_27B="false"
-for t in "${TARGETS[@]}"; do
-  [[ "${t}" == "mac-m1" ]] && WANT_27B="true"
-done
 # Vision projector is needed by every platform that runs the 35B-A3B (i.e.
 # all of them). Build_bundle always copies it.
 WANT_MMPROJ="true"
@@ -168,9 +164,6 @@ copy_model_alias() {
 copy_models() {
   [[ "${SKIP_MODEL}" == "true" ]] && { echo "skip-model: leaving ${OUT}/models untouched"; return; }
   copy_model_alias qwen3.6-35b-a3b-q4 true
-  if [[ "${WANT_27B}" == "true" ]]; then
-    copy_model_alias qwen3.6-27b-q4 true
-  fi
 }
 
 prepare_pi_npm_bundle() {
@@ -276,13 +269,23 @@ EOF
 
   cat > "${t}/install.sh" <<'EOF'
 #!/usr/bin/env bash
-# Install the local Qwen stack into ~/.local/devstral and register a
+# Install the local Qwen stack into ~/.local/slopcode and register a
 # systemd --user service. No sudo required.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE_ROOT="$(cd "${HERE}/.." && pwd)"
-DEST="${HOME}/.local/devstral"
+DEST="${HOME}/.local/slopcode"
+LEGACY_DEST="${HOME}/.local/devstral"
 mkdir -p "${DEST}/llama.cpp" "${DEST}/opencode" "${DEST}/models"
+# Boot out the previous devstral-named unit if present so the new
+# slopcode-llamacpp service doesn't race a stale ExecStart pointing at
+# the old install path.
+if systemctl --user list-unit-files devstral-llamacpp.service >/dev/null 2>&1; then
+  systemctl --user disable --now devstral-llamacpp.service 2>/dev/null || true
+  rm -f "${HOME}/.config/systemd/user/devstral-llamacpp.service"
+  systemctl --user daemon-reload 2>/dev/null || true
+fi
+[[ -d "${LEGACY_DEST}" ]] && rm -rf "${LEGACY_DEST}"
 cp -R "${HERE}/llama.cpp/." "${DEST}/llama.cpp/"
 cp -R "${HERE}/opencode/." "${DEST}/opencode/"
 chmod +x "${DEST}/opencode/opencode" 2>/dev/null || true
@@ -304,9 +307,9 @@ THREADS=$(( PHYS - 2 ))
 
 UNIT_DIR="${HOME}/.config/systemd/user"
 mkdir -p "${UNIT_DIR}"
-cat > "${UNIT_DIR}/devstral-llamacpp.service" <<UNIT
+cat > "${UNIT_DIR}/slopcode-llamacpp.service" <<UNIT
 [Unit]
-Description=devstral llama.cpp (Qwen3.6 35B-A3B Q4)
+Description=slopcode llama.cpp (Qwen3.6 35B-A3B Q4)
 After=default.target
 
 [Service]
@@ -320,7 +323,7 @@ WantedBy=default.target
 UNIT
 
 systemctl --user daemon-reload
-systemctl --user enable --now devstral-llamacpp.service
+systemctl --user enable --now slopcode-llamacpp.service
 
 # Linger lets the user's systemd instance (and therefore the llama.cpp
 # service) start at boot and survive logout, without needing root. On
@@ -328,7 +331,7 @@ systemctl --user enable --now devstral-llamacpp.service
 # without an admin password; if it doesn't, the service still starts at
 # the next interactive login.
 if loginctl enable-linger "${USER}" >/dev/null 2>&1; then
-  echo "linger enabled: devstral-llamacpp starts at boot"
+  echo "linger enabled: slopcode-llamacpp starts at boot"
 else
   echo "note: could not enable-linger (polkit denied); service will start"
   echo "      at user login, not at boot. Run manually later with:"
@@ -336,7 +339,7 @@ else
 fi
 
 sleep 2
-systemctl --user status --no-pager devstral-llamacpp.service | head -15
+systemctl --user status --no-pager slopcode-llamacpp.service | head -15
 
 mkdir -p "${HOME}/.config/opencode"
 cat > "${HOME}/.config/opencode/opencode.json" <<JSON
@@ -447,118 +450,112 @@ build_mac_m1() {
   install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
   install -m 755 "${SCRIPT_DIR}/pi_privacy.sh" "${t}/pi_privacy.sh"
 
-  # Foreground manual launch: starts both 35B-A3B (8080) and 27B (8081).
+  # Foreground manual launch: single 35B-A3B at :8080 with mmproj. Mirrors
+  # install_macbook_launchagent.sh: -c 131072 -np 1, Metal full offload, no
+  # MoE split, no thread cap. The Mac Studio dual-instance setup with the
+  # 27B dense companion is intentionally not part of the USB bundle.
   cat > "${t}/start.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODEL_35B="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
-MODEL_27B="${HERE}/../models/Qwen_Qwen3.6-27B-Q4_K_M.gguf"
-MMPROJ_35B="$(ls "${HERE}/../models"/mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf 2>/dev/null | head -1)"
-MMPROJ_27B="$(ls "${HERE}/../models"/mmproj-Qwen_Qwen3.6-27B-*.gguf 2>/dev/null | head -1)"
-[[ -f "${MODEL_35B}" ]] || { ls "${HERE}/../models"; echo "35B model not found"; exit 1; }
-[[ -f "${MODEL_27B}" ]] || { ls "${HERE}/../models"; echo "27B model not found"; exit 1; }
-[[ -f "${MMPROJ_35B}" ]] || { ls "${HERE}/../models"; echo "mmproj-35B-A3B not found"; exit 1; }
-[[ -f "${MMPROJ_27B}" ]] || { ls "${HERE}/../models"; echo "mmproj-27B not found"; exit 1; }
+MODEL="${HERE}/../models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+MMPROJ="$(ls "${HERE}/../models"/mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf 2>/dev/null | head -1)"
+[[ -f "${MODEL}" ]] || { ls "${HERE}/../models"; echo "model not found"; exit 1; }
+[[ -f "${MMPROJ}" ]] || { ls "${HERE}/../models"; echo "mmproj-35B-A3B not found"; exit 1; }
 export DYLD_LIBRARY_PATH="${HERE}/llama.cpp${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
-"${HERE}/llama.cpp/llama-server" \
-  -m "${MODEL_35B}" --mmproj "${MMPROJ_35B}" \
-  -c 524288 --cache-type-k q8_0 --cache-type-v q8_0 \
-  -b 2048 -ub 512 -ngl 99 -fa on -np 2 \
-  --alias qwen-35b-a3b --jinja \
-  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 \
-  --presence-penalty 0.0 --repeat-penalty 1.0 \
-  --reasoning-format deepseek --reasoning-budget 4096 \
-  --no-context-shift --reasoning on \
-  --host 0.0.0.0 --port 8080 &
-PID_35B=$!
-trap 'kill ${PID_35B} 2>/dev/null || true' EXIT
 exec "${HERE}/llama.cpp/llama-server" \
-  -m "${MODEL_27B}" --mmproj "${MMPROJ_27B}" \
-  -c 524288 --cache-type-k q8_0 --cache-type-v q8_0 \
-  -b 2048 -ub 512 -ngl 99 -fa on -np 2 \
-  --alias qwen-27b --jinja \
+  -m "${MODEL}" --mmproj "${MMPROJ}" \
+  -c 131072 --cache-type-k q8_0 --cache-type-v q8_0 \
+  -b 2048 -ub 1024 -ngl 99 -fa on -np 1 \
+  --alias qwen --jinja \
   --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 \
   --presence-penalty 0.0 --repeat-penalty 1.0 \
   --reasoning-format deepseek --reasoning-budget 4096 \
   --no-context-shift --reasoning on \
-  --host 0.0.0.0 --port 8081
+  --host 0.0.0.0 --port 8080
 EOF
   chmod +x "${t}/start.sh"
 
   cat > "${t}/install.sh" <<'EOF'
 #!/usr/bin/env bash
-# Install the dual-instance Qwen stack into ~/Library/Application Support/devstral
-# and register two launchd user agents (no sudo, no admin):
-#   com.devstral.llamacpp-35b-a3b -> Qwen3.6 35B-A3B Q4 (MoE) on :8080
-#   com.devstral.llamacpp-27b     -> Qwen3.6 27B    Q4 (dense) on :8081
+# Install the single-instance Qwen stack into ~/Library/Application Support/slopcode
+# and register a launchd user agent (no sudo, no admin):
+#   com.slopcode.llamacpp-macbook -> Qwen3.6 35B-A3B Q4 (MoE) on :8080
+# Mirrors install_macbook_launchagent.sh: -c 131072 -np 1, alias qwen,
+# Metal full offload, with mmproj for image input. Hosts that want the
+# dual-instance Mac Studio layout install via install_mac_launchagents.sh
+# from the slopcode-infra repo, not the USB bundle.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE_ROOT="$(cd "${HERE}/.." && pwd)"
-DEST="${HOME}/Library/Application Support/devstral"
-LOG_DIR="${HOME}/Library/Logs/devstral"
+DEST="${HOME}/Library/Application Support/slopcode"
+LEGACY_DEST="${HOME}/Library/Application Support/devstral"
+LOG_DIR="${HOME}/Library/Logs/slopcode"
+LEGACY_LOG_DIR="${HOME}/Library/Logs/devstral"
 AGENTS_DIR="${HOME}/Library/LaunchAgents"
 mkdir -p "${DEST}/llama.cpp" "${DEST}/opencode" "${DEST}/models" "${LOG_DIR}" "${AGENTS_DIR}"
 cp -R "${HERE}/llama.cpp/." "${DEST}/llama.cpp/"
 cp -R "${HERE}/opencode/." "${DEST}/opencode/"
 chmod +x "${DEST}/opencode/opencode" 2>/dev/null || true
 find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -exec cp -n {} "${DEST}/models/" \;
-find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-27B-Q4_K_M*.gguf' -exec cp -n {} "${DEST}/models/" \;
 find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf' -exec cp -n {} "${DEST}/models/" \;
-find "${BUNDLE_ROOT}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-27B-*.gguf' -exec cp -n {} "${DEST}/models/" \;
 
-MODEL_35B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
-MODEL_27B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-27B-Q4_K_M*.gguf' -print -quit)"
-MMPROJ_35B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf' -print -quit)"
-MMPROJ_27B="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-27B-*.gguf' -print -quit)"
-[[ -n "${MODEL_35B}" ]] || { echo "35B model missing under ${DEST}/models"; exit 1; }
-[[ -n "${MODEL_27B}" ]] || { echo "27B model missing under ${DEST}/models"; exit 1; }
-[[ -n "${MMPROJ_35B}" ]] || { echo "mmproj-35B-A3B missing under ${DEST}/models"; exit 1; }
-[[ -n "${MMPROJ_27B}" ]] || { echo "mmproj-27B missing under ${DEST}/models"; exit 1; }
+MODEL="$(find "${DEST}/models" -maxdepth 1 -type f -name 'Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf' -print -quit)"
+MMPROJ="$(find "${DEST}/models" -maxdepth 1 -type f -name 'mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf' -print -quit)"
+[[ -n "${MODEL}" ]] || { echo "model missing under ${DEST}/models"; exit 1; }
+[[ -n "${MMPROJ}" ]] || { echo "mmproj-35B-A3B missing under ${DEST}/models"; exit 1; }
 
 SERVER_BIN="${DEST}/llama.cpp/llama-server"
 SERVER_DIR="${DEST}/llama.cpp"
+LABEL="com.slopcode.llamacpp-macbook"
+PLIST="${AGENTS_DIR}/${LABEL}.plist"
+LOG="${LOG_DIR}/llamacpp.log"
 
 bootout_legacy() {
   local label="$1"
-  if launchctl list | awk '{print $3}' | grep -qx "${label}"; then
-    launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || launchctl unload "${AGENTS_DIR}/${label}.plist" 2>/dev/null || true
+  if launchctl list 2>/dev/null | awk '{print $3}' | grep -qx "${label}"; then
+    launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null \
+      || launchctl unload "${AGENTS_DIR}/${label}.plist" 2>/dev/null || true
   fi
   rm -f "${AGENTS_DIR}/${label}.plist"
 }
-# Legacy single-instance labels from older bundles -> remove cleanly first.
-bootout_legacy com.qwenstack.llamacpp
-bootout_legacy com.devstral.llamacpp-local
+# Strip every previous label this project has shipped, including the
+# devstral-named ones, so the new agent lands on a clean slot.
+for legacy in com.qwenstack.llamacpp \
+              com.devstral.llamacpp-local \
+              com.devstral.llamacpp-35b-a3b \
+              com.devstral.llamacpp-27b \
+              com.devstral.llamacpp-macbook \
+              com.slopcode.llamacpp-35b-a3b \
+              com.slopcode.llamacpp-27b \
+              com.slopcode.llamacpp-macbook; do
+  bootout_legacy "${legacy}"
+done
+[[ -d "${LEGACY_DEST}" ]] && rm -rf "${LEGACY_DEST}"
+[[ -d "${LEGACY_LOG_DIR}" ]] && rm -rf "${LEGACY_LOG_DIR}"
 
-write_plist() {
-  local label="$1" port="$2" alias="$3" model="$4" instance="$5" mmproj="${6:-}"
-  local plist="${AGENTS_DIR}/${label}.plist"
-  local log="${LOG_DIR}/llamacpp-${instance}.log"
-  local mmproj_xml=""
-  if [[ -n "${mmproj}" ]]; then
-    mmproj_xml=$'\n    <string>--mmproj</string><string>'"${mmproj}"$'</string>'
-  fi
-  cat > "${plist}" <<XML
+cat > "${PLIST}" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>${label}</string>
+  <key>Label</key><string>${LABEL}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProgramArguments</key>
   <array>
     <string>${SERVER_BIN}</string>
-    <string>-m</string><string>${model}</string>${mmproj_xml}
-    <string>-c</string><string>524288</string>
+    <string>-m</string><string>${MODEL}</string>
+    <string>--mmproj</string><string>${MMPROJ}</string>
+    <string>-c</string><string>131072</string>
     <string>-b</string><string>2048</string>
-    <string>-ub</string><string>512</string>
+    <string>-ub</string><string>1024</string>
     <string>-ngl</string><string>99</string>
     <string>-fa</string><string>on</string>
-    <string>-np</string><string>2</string>
+    <string>-np</string><string>1</string>
     <string>--cache-type-k</string><string>q8_0</string>
     <string>--cache-type-v</string><string>q8_0</string>
-    <string>--alias</string><string>${alias}</string>
+    <string>--alias</string><string>qwen</string>
     <string>--jinja</string>
     <string>--temp</string><string>0.6</string>
     <string>--top-p</string><string>0.95</string>
@@ -571,31 +568,26 @@ write_plist() {
     <string>--no-context-shift</string>
     <string>--reasoning</string><string>on</string>
     <string>--host</string><string>0.0.0.0</string>
-    <string>--port</string><string>${port}</string>
+    <string>--port</string><string>8080</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>DYLD_LIBRARY_PATH</key><string>${SERVER_DIR}</string>
   </dict>
-  <key>StandardOutPath</key><string>${log}</string>
-  <key>StandardErrorPath</key><string>${log}</string>
+  <key>StandardOutPath</key><string>${LOG}</string>
+  <key>StandardErrorPath</key><string>${LOG}</string>
 </dict>
 </plist>
 XML
-  launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "${plist}"
-  echo "loaded ${label} (port ${port}, alias ${alias})"
-}
-
-write_plist com.devstral.llamacpp-35b-a3b 8080 qwen-35b-a3b "${MODEL_35B}" 35b-a3b "${MMPROJ_35B}"
-write_plist com.devstral.llamacpp-27b     8081 qwen-27b     "${MODEL_27B}" 27b     "${MMPROJ_27B}"
+launchctl bootstrap "gui/$(id -u)" "${PLIST}"
+echo "loaded ${LABEL} (35B-A3B Q4 on :8080, alias qwen)"
 
 mkdir -p "${HOME}/.config/opencode"
 cat > "${HOME}/.config/opencode/opencode.json" <<JSON
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "llamacpp/qwen-27b",
-  "small_model": "llamacpp-moe/qwen-35b-a3b",
+  "model": "llamacpp/qwen",
+  "small_model": "llamacpp/qwen",
   "agent": {"title": {"disable": true}},
   "share": "disabled",
   "autoupdate": false,
@@ -606,28 +598,12 @@ cat > "${HOME}/.config/opencode/opencode.json" <<JSON
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp 27B (Local)",
-      "options": {"baseURL": "http://127.0.0.1:8081/v1"},
-      "models": {
-        "qwen-27b": {
-          "name": "Qwen3.6 27B Q4 + KV-Q8 (Local dense)",
-          "limit": {"context": 262144, "output": 16384},
-          "reasoning": true,
-          "attachment": true,
-          "tool_call": true,
-          "modalities": {"input": ["text", "image"], "output": ["text"]},
-          "options": {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0, "thinking_budget": 4096}
-        }
-      }
-    },
-    "llamacpp-moe": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp 35B-A3B (Local)",
+      "name": "llama.cpp (Local)",
       "options": {"baseURL": "http://127.0.0.1:8080/v1"},
       "models": {
-        "qwen-35b-a3b": {
-          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)",
-          "limit": {"context": 262144, "output": 16384},
+        "qwen": {
+          "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)",
+          "limit": {"context": 131072, "output": 16384},
           "reasoning": true,
           "attachment": true,
           "tool_call": true,
@@ -678,7 +654,7 @@ cat > "${HOME}/.pi/agent/models.json" <<JSON
           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local llama.cpp)",
           "reasoning": true,
           "input": ["text", "image"],
-          "contextWindow": 262144,
+          "contextWindow": 131072,
           "maxTokens": 16384,
           "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
         }
@@ -696,20 +672,16 @@ case ":${PATH}:" in
 esac
 
 echo
-echo "waiting for both endpoints (up to 900s each)..."
-wait_ready() {
-  local port="$1" deadline=$(( $(date +%s) + 900 ))
-  while : ; do
-    if curl -fsS "http://127.0.0.1:${port}/v1/models" >/dev/null 2>&1; then
-      echo "ready: http://127.0.0.1:${port}/v1"
-      return 0
-    fi
-    [[ $(date +%s) -ge ${deadline} ]] && { echo "timed out on port ${port}" >&2; return 1; }
-    sleep 2
-  done
-}
-wait_ready 8080 || true
-wait_ready 8081 || true
+echo "waiting for /v1/models on :8080 (up to 900s)..."
+deadline=$(( $(date +%s) + 900 ))
+while : ; do
+  if curl -fsS "http://127.0.0.1:8080/v1/models" >/dev/null 2>&1; then
+    echo "ready: http://127.0.0.1:8080/v1"
+    break
+  fi
+  [[ $(date +%s) -ge ${deadline} ]] && { echo "timed out on port 8080" >&2; break; }
+  sleep 2
+done
 
 echo "OK. New shell, then: opencode   (or: ${DEST}/opencode/opencode)"
 EOF
@@ -746,10 +718,10 @@ if not exist "%MMPROJ%" (
 REM Reserve 2 physical cores for the host (Claude Code, opencode, DE) so
 REM MoE decode doesn't starve unrelated userspace and trip TCP idle timeouts.
 set THREADS=
-powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\devstral_threads.txt" 2>nul
-if exist "%TEMP%\devstral_threads.txt" (
-  set /p THREADS=<"%TEMP%\devstral_threads.txt"
-  del "%TEMP%\devstral_threads.txt"
+powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\slopcode_threads.txt" 2>nul
+if exist "%TEMP%\slopcode_threads.txt" (
+  set /p THREADS=<"%TEMP%\slopcode_threads.txt"
+  del "%TEMP%\slopcode_threads.txt"
 )
 if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
 if !THREADS! LSS 2 set THREADS=2
@@ -767,16 +739,22 @@ EOF
 
   cat > "${t}/install.bat" <<'EOF'
 @echo off
-REM Install the local Qwen stack into %USERPROFILE%\devstral and register a
+REM Install the local Qwen stack into %USERPROFILE%\slopcode and register a
 REM Startup shortcut so the server launches at every logon. No admin, no UAC:
 REM the Startup folder and %USERPROFILE% are always user-writable.
 setlocal EnableDelayedExpansion
 set HERE=%~dp0
 set BUNDLE_ROOT=%HERE%..
-set DEST=%USERPROFILE%\devstral
+set DEST=%USERPROFILE%\slopcode
+set LEGACY_DEST=%USERPROFILE%\devstral
 set STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
 set OC_CFG_DIR=%USERPROFILE%\.config\opencode
 set OC_CFG=%OC_CFG_DIR%\opencode.json
+
+REM Strip the prior devstral-named startup shortcut and install dir so the
+REM new slopcode-llamacpp shortcut doesn't run alongside a stale one.
+if exist "%STARTUP%\devstral-llamacpp.bat" del /Q "%STARTUP%\devstral-llamacpp.bat" >nul
+if exist "%LEGACY_DEST%" rmdir /S /Q "%LEGACY_DEST%" >nul 2>&1
 
 echo [1/6] creating %DEST%
 if not exist "%DEST%" mkdir "%DEST%"
@@ -803,20 +781,20 @@ if not exist "%MMPROJ%" (
 
 echo [3/6] detecting physical cores and writing %DEST%\run-llamacpp.bat
 set THREADS=
-powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\devstral_threads.txt" 2>nul
-if exist "%TEMP%\devstral_threads.txt" (
-  set /p THREADS=<"%TEMP%\devstral_threads.txt"
-  del "%TEMP%\devstral_threads.txt"
+powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\slopcode_threads.txt" 2>nul
+if exist "%TEMP%\slopcode_threads.txt" (
+  set /p THREADS=<"%TEMP%\slopcode_threads.txt"
+  del "%TEMP%\slopcode_threads.txt"
 )
 if "!THREADS!"=="" set /a THREADS=%NUMBER_OF_PROCESSORS%/2 - 1
 if !THREADS! LSS 2 set THREADS=2
 echo     using --threads !THREADS! --threads-http 4
 > "%DEST%\run-llamacpp.bat" echo @echo off
->> "%DEST%\run-llamacpp.bat" echo start "devstral-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads !THREADS! --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
+>> "%DEST%\run-llamacpp.bat" echo start "slopcode-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads !THREADS! --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
 
-echo [4/6] installing Startup shortcut at "%STARTUP%\devstral-llamacpp.bat"
+echo [4/6] installing Startup shortcut at "%STARTUP%\slopcode-llamacpp.bat"
 if not exist "%STARTUP%" mkdir "%STARTUP%"
-copy /Y "%DEST%\run-llamacpp.bat" "%STARTUP%\devstral-llamacpp.bat" >nul
+copy /Y "%DEST%\run-llamacpp.bat" "%STARTUP%\slopcode-llamacpp.bat" >nul
 
 echo [5/6] writing OpenCode config to %OC_CFG%
 if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
@@ -920,7 +898,7 @@ echo     (env vars and PATH take effect in new cmd/powershell windows, not this 
 
 echo.
 echo Starting the server now (will also auto-start at every logon)...
-start "devstral-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads !THREADS! --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
+start "slopcode-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads !THREADS! --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
 
 echo.
 echo OK. Wait ~30s for the model to load, then open a NEW command prompt
@@ -931,7 +909,7 @@ EOF
 }
 
 cat > "${OUT}/README.txt" <<'EOF'
-devstral USB bundle (Qwen3.6 local stack)
+slopcode USB bundle (Qwen3.6 local stack)
 =========================================
 
 Three self-contained per-OS directories plus a shared models/ folder:
@@ -940,8 +918,10 @@ Three self-contained per-OS directories plus a shared models/ folder:
                   -> single 35B-A3B :8080, 256K window, --n-cpu-moe 35,
                      image input via mmproj
   mac-m1/       Apple Silicon Mac (install.sh, no sudo)
-                  -> dual instance: 35B-A3B :8080 + 27B dense :8081,
-                     256K per slot (-c 524288 -np 2), both with image input
+                  -> single 35B-A3B :8080, 128K window, Metal full offload,
+                     image input via mmproj. Mirrors install_macbook_launchagent.sh.
+                     The Mac Studio dual-instance layout is set up directly
+                     from the slopcode-infra repo, not from the USB.
   windows-arc/  Windows + Vulkan GPU (install.bat, no admin)
                   -> single 35B-A3B :8080, 256K window, --n-cpu-moe 35,
                      image input via mmproj
@@ -949,8 +929,6 @@ Three self-contained per-OS directories plus a shared models/ folder:
   models/       Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf       (~20 GB, all platforms)
                 mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf (~1 GB,  vision projector,
                                                        all platforms)
-                Qwen_Qwen3.6-27B-Q4_K_M.gguf          (~16 GB, Mac only)
-                mmproj-Qwen_Qwen3.6-27B-bf16.gguf     (~1 GB,  Mac only)
 
 Requires exFAT formatting on the USB stick (FAT32 cannot hold the 20 GB
 GGUF; exFAT is mounted natively by Windows and macOS and supported by
@@ -961,16 +939,15 @@ To install on a target machine:
   Linux/Mac:   ./<target>/install.sh
   Windows:     .\windows-arc\install.bat
 
-The installer copies llama.cpp + opencode + the model(s) into the user's
-home directory, registers a user-level service (systemd --user, two
-launchd agents on Mac, or a Startup shortcut on Windows), runs the bundled
-offline npm install for the Pi Coding Agent, and writes OpenCode + Pi
-configs that disable every outbound network call beyond the local LLM
-endpoint. Image input is enabled wherever a vision projector is shipped.
+The installer copies llama.cpp + opencode + the model into the user's
+home directory, registers a user-level service (systemd --user on Linux,
+a launchd user agent on Mac, a Startup shortcut on Windows), runs the
+bundled offline npm install for the Pi Coding Agent, and writes OpenCode
++ Pi configs that disable every outbound network call beyond the local
+LLM endpoint. Image input is enabled via the bundled vision projector.
 
 Smoke test:
   curl -s http://127.0.0.1:8080/v1/models
-  (Mac also: curl -s http://127.0.0.1:8081/v1/models)
 
 Then launch opencode from the bundle's opencode/ directory, or pi if node/npm
 were installed and the bundled offline npm install succeeded.
