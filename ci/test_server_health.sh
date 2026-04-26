@@ -4,7 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-MOCK_PORT="${MOCK_PORT:-18080}"
+# Pick a free port instead of hardcoding one — the dev box already runs
+# unrelated services (e.g. slopsearch on 18080) and the mock server has
+# nothing fixed about its port.
+if [[ -z "${MOCK_PORT:-}" ]]; then
+  MOCK_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+fi
 MOCK_PID=""
 
 cleanup() {

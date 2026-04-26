@@ -10,6 +10,19 @@ FAILED=0
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
+# Pick a free TCP port instead of hardcoding values that may be in use on
+# the dev box (e.g. slopsearch already binds 18080). Falls back to a
+# deterministic per-test offset above the ephemeral range if Python is
+# unavailable for some reason.
+free_port() {
+  python3 - <<'PY'
+import socket
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+}
+
 test_server_start_dry_run() {
   echo "TEST: llama.cpp launcher dry-run profile"
   local home_dir="${TMPDIR}/home"
@@ -27,12 +40,14 @@ EOF
   local output
   local reasoning_budget
   reasoning_budget="$(default_reasoning_budget)"
+  local port
+  port="$(free_port)"
   output="$(
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
     LLAMACPP_MMPROJ="${mmproj_path}" \
-    LLAMACPP_PORT=18080 \
+    LLAMACPP_PORT="${port}" \
     LLAMACPP_SMOKE_TEST=false \
     LLAMACPP_DRY_RUN=true \
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
@@ -71,7 +86,7 @@ EOF
         "${output}" == *"--reasoning-budget ${reasoning_budget}"* && \
         "${output}" == *"--top-p 0.95"* && \
         "${output}" == *"--top-k 20"* && \
-        "${output}" == *"--port 18080"* && \
+        "${output}" == *"--port ${port}"* && \
         "${output}" == *"-np 1"* && \
         "${output}" == *"-ub 1024"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
@@ -99,13 +114,14 @@ EOF
   : > "${model_path}"
   : > "${mmproj_path}"
 
-  local output
+  local output port
+  port="$(free_port)"
   output="$(
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
     LLAMACPP_MMPROJ="${mmproj_path}" \
-    LLAMACPP_PORT=18082 \
+    LLAMACPP_PORT="${port}" \
     LLAMACPP_THREADS=7 \
     LLAMACPP_THREADS_HTTP=3 \
     LLAMACPP_SMOKE_TEST=false \
@@ -145,13 +161,14 @@ EOF
   chmod +x "${home_dir}/.local/llama.cpp/llama-server"
   : > "${model_path}"
 
-  local output
+  local output port
+  port="$(free_port)"
   output="$(
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
     LLAMACPP_MMPROJ=off \
-    LLAMACPP_PORT=18081 \
+    LLAMACPP_PORT="${port}" \
     LLAMACPP_INSTANCE=27b \
     LLAMACPP_SERVED_ALIAS=qwen-27b \
     LLAMACPP_SMOKE_TEST=false \
@@ -160,7 +177,7 @@ EOF
   )"
 
   if [[ "${output}" == *"--alias qwen-27b"* && \
-        "${output}" == *"--port 18081"* && \
+        "${output}" == *"--port ${port}"* && \
         "${output}" == *"- instance: 27b"* && \
         "${output}" == *"-np 1"* && \
         "${output}" == *"-ub 1024"* ]]; then
@@ -387,11 +404,13 @@ EOF
   : > "${model_path}"
   : > "${mmproj_path}"
 
+  local port
+  port="$(free_port)"
   HOME="${home_dir}" \
   LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
   LLAMACPP_MODEL="${model_path}" \
   LLAMACPP_MMPROJ="${mmproj_path}" \
-  LLAMACPP_PORT=18084 \
+  LLAMACPP_PORT="${port}" \
   LLAMACPP_SMOKE_TEST=false \
   LLAMACPP_EXEC=true \
   bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh" >/dev/null 2>&1
@@ -411,7 +430,7 @@ EOF
   if grep -qx -- '-np' "${stamp}" \
     && grep -qx -- '1' "${stamp}" \
     && grep -qx -- '--port' "${stamp}" \
-    && grep -qx -- '18084' "${stamp}" \
+    && grep -qx -- "${port}" "${stamp}" \
     && grep -qx -- '--reasoning-budget' "${stamp}" \
     && grep -qx -- "$(default_reasoning_budget)" "${stamp}" \
     && grep -qx -- '-ub' "${stamp}" \
@@ -443,13 +462,14 @@ EOF
   : > "${model_path}"
   : > "${mmproj_path}"
 
-  local output
+  local output port
+  port="$(free_port)"
   output="$(
     HOME="${home_dir}" \
     LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
     LLAMACPP_MODEL="${model_path}" \
     LLAMACPP_MMPROJ="${mmproj_path}" \
-    LLAMACPP_PORT=18086 \
+    LLAMACPP_PORT="${port}" \
     LLAMACPP_CPU_MOE=true \
     LLAMACPP_SMOKE_TEST=false \
     LLAMACPP_DRY_RUN=true \

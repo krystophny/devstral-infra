@@ -12,7 +12,10 @@
 #   opencode/    unpacked opencode release for that OS
 #   install.sh or install.bat   copies into ~/.local/slopcode and registers a user service
 #   start.sh or start.bat       foreground launch for manual testing
+#   node/                       Node.js LTS runtime for that OS (bin/node + npm)
 # The shared pi/ directory contains an npm offline cache and Pi package tarball.
+# Together with each target's bundled node/, that lets the per-OS installer
+# install Pi without any online step or any pre-existing Node on the host.
 #
 # Models live once at <out>/models/ and are referenced by every per-OS start
 # script via relative paths:
@@ -50,6 +53,7 @@ OUT=""
 LLAMACPP_TAG="${LLAMACPP_TAG:-}"
 OPENCODE_TAG="${OPENCODE_TAG:-}"
 PI_VERSION="${PI_VERSION:-0.70.2}"
+NODE_VERSION="${NODE_VERSION:-}"
 SKIP_MODEL="${SKIP_MODEL:-false}"
 
 while [[ $# -gt 0 ]]; do
@@ -74,6 +78,12 @@ mkdir -p "${OUT}/models"
 # all of them). Build_bundle always copies it.
 WANT_MMPROJ="true"
 
+# Network defaults for every curl in this script. --connect-timeout caps
+# DNS+TCP+TLS at 30 s and --max-time caps the whole transfer at 30 min,
+# so a wedged GitHub mirror or registry can never silently stall the
+# bundle build. --retry handles transient TCP RSTs without a wrapper.
+CURL_OPTS=(-fsSL --connect-timeout 30 --max-time 1800 --retry 3 --retry-delay 5)
+
 resolve_llamacpp_asset() {
   local flavor="$1"
   local api="https://api.github.com/repos/ggml-org/llama.cpp/releases"
@@ -83,7 +93,7 @@ resolve_llamacpp_asset() {
   else
     url="${api}/latest"
   fi
-  curl -fsSL "${url}" | python3 -c '
+  curl "${CURL_OPTS[@]}" "${url}" | python3 -c '
 import json, re, sys
 flavor = sys.argv[1]
 data = json.load(sys.stdin)
@@ -105,7 +115,7 @@ resolve_opencode_asset() {
   else
     url="${api}/latest"
   fi
-  curl -fsSL "${url}" | python3 -c '
+  curl "${CURL_OPTS[@]}" "${url}" | python3 -c '
 import json, sys
 suffix = sys.argv[1]
 data = json.load(sys.stdin)
@@ -117,11 +127,79 @@ sys.exit(1)
 ' "${suffix}"
 }
 
+resolve_node_version() {
+  if [[ -n "${NODE_VERSION}" ]]; then
+    echo "${NODE_VERSION}"
+    return
+  fi
+  curl "${CURL_OPTS[@]}" "https://nodejs.org/dist/index.json" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for entry in data:
+    if entry.get("lts"):
+        print(entry["version"])
+        sys.exit(0)
+sys.exit(1)
+'
+}
+
+# Node.js archives unpack to a single wrapper directory like
+# node-v22.x.x-linux-x64/. Flatten that wrapper into ${dest} so the install
+# scripts can reference ${dest}/bin/node (Unix) or ${dest}/node.exe (Windows).
+fetch_node_archive() {
+  local url="$1" dest="$2"
+  local tmp
+  tmp="$(mktemp -d)"
+  curl "${CURL_OPTS[@]}" -o "${tmp}/pkg" "${url}"
+  mkdir -p "${dest}" "${tmp}/unpacked"
+  case "${url}" in
+    *.tar.xz) tar -xJf "${tmp}/pkg" -C "${tmp}/unpacked" ;;
+    *.tar.gz) tar -xzf "${tmp}/pkg" -C "${tmp}/unpacked" ;;
+    *.zip)    unzip -q -o "${tmp}/pkg" -d "${tmp}/unpacked" ;;
+    *) die "unknown node archive: ${url}" ;;
+  esac
+  local inner
+  inner="$(find "${tmp}/unpacked" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+  [[ -d "${inner}" ]] || die "node archive layout unexpected: ${url}"
+  # -L dereferences symlinks (notably bin/npm -> ../lib/node_modules/npm/...)
+  # so the unpacked tree can sit on exFAT, which has no symlink support.
+  cp -RL "${inner}/." "${dest}/"
+  rm -rf "${tmp}"
+}
+
+prepare_node_runtime() {
+  local target_dir="$1" flavor="$2"
+  local node_dir="${target_dir}/node"
+  local node_ver
+  node_ver="$(resolve_node_version)"
+  [[ -n "${node_ver}" ]] || die "could not resolve Node.js LTS version"
+  rm -rf "${node_dir}"
+  mkdir -p "${node_dir}"
+  local archive
+  case "${flavor}" in
+    linux-x64)    archive="node-${node_ver}-linux-x64.tar.xz" ;;
+    darwin-arm64) archive="node-${node_ver}-darwin-arm64.tar.xz" ;;
+    win-x64)      archive="node-${node_ver}-win-x64.zip" ;;
+    *) die "unknown node flavor: ${flavor}" ;;
+  esac
+  local url="https://nodejs.org/dist/${node_ver}/${archive}"
+  echo "node ${node_ver} (${flavor})"
+  fetch_node_archive "${url}" "${node_dir}"
+  if [[ "${flavor}" == "win-x64" ]]; then
+    [[ -f "${node_dir}/node.exe" ]] || die "node.exe missing under ${node_dir}"
+    [[ -f "${node_dir}/npm.cmd"  ]] || die "npm.cmd missing under ${node_dir}"
+    [[ -f "${node_dir}/node_modules/npm/bin/npm-cli.js" ]] || die "npm-cli.js missing under ${node_dir}"
+  else
+    [[ -x "${node_dir}/bin/node" ]] || die "bin/node missing under ${node_dir}"
+    [[ -f "${node_dir}/lib/node_modules/npm/bin/npm-cli.js" ]] || die "npm-cli.js missing under ${node_dir}"
+  fi
+}
+
 fetch_archive() {
   local url="$1" dest="$2"
   local tmp
   tmp="$(mktemp -d)"
-  curl -fsSL -o "${tmp}/pkg" "${url}"
+  curl "${CURL_OPTS[@]}" -o "${tmp}/pkg" "${url}"
   mkdir -p "${dest}" "${tmp}/unpacked"
   case "${url}" in
     *.tar.gz|*.tgz) tar -xzf "${tmp}/pkg" -C "${tmp}/unpacked" ;;
@@ -199,34 +277,12 @@ PY
 
   npm pack --pack-destination "${pi_dir}" \
     "@mariozechner/pi-coding-agent@${PI_VERSION}" >/dev/null
-  cat > "${pi_dir}/install-unix.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PI_TELEMETRY=0
-export PI_SKIP_VERSION_CHECK=1
-npm install -g --offline --cache "${HERE}/npm-cache" \
-  "${HERE}"/mariozechner-pi-coding-agent-*.tgz
-EOF
-  chmod +x "${pi_dir}/install-unix.sh"
-  cat > "${pi_dir}/install-windows.bat" <<'EOF'
-@echo off
-setlocal
-set HERE=%~dp0
-set PI_TELEMETRY=0
-set PI_SKIP_VERSION_CHECK=1
-for %%F in ("%HERE%mariozechner-pi-coding-agent-*.tgz") do (
-  npm install -g --offline --cache "%HERE%npm-cache" "%%~fF"
-  exit /b %ERRORLEVEL%
-)
-echo Pi package tarball missing under %HERE%
-exit /b 1
-EOF
   rm -rf "${tmp}"
 }
 
 build_linux_cuda() {
   local t="${OUT}/linux-cuda"
+  rm -rf "${t}/llama.cpp" "${t}/opencode" "${t}/node"
   mkdir -p "${t}/llama.cpp" "${t}/opencode"
   read -r tag url <<< "$(resolve_llamacpp_asset "ubuntu-vulkan-x64" || die "no ubuntu-vulkan-x64 asset")"
   echo "linux-cuda: llama.cpp ${tag}"
@@ -236,6 +292,8 @@ build_linux_cuda() {
   echo "linux-cuda: opencode ${oc_tag}"
   fetch_archive "${oc_url}" "${t}/opencode"
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
+
+  prepare_node_runtime "${t}" linux-x64
 
   install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
   install -m 755 "${SCRIPT_DIR}/pi_privacy.sh" "${t}/pi_privacy.sh"
@@ -378,12 +436,23 @@ JSON
 bash "${HERE}/opencode_privacy.sh"
 bash "${HERE}/pi_privacy.sh"
 
-if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-  echo "installing Pi Coding Agent from bundled npm cache..."
-  bash "${BUNDLE_ROOT}/pi/install-unix.sh"
-else
-  echo "note: node/npm not found; skipping Pi install"
-fi
+# Bundled Node.js LTS + offline npm cache: no system node/npm required, no
+# sudo, nothing leaks outside ${DEST}.
+mkdir -p "${DEST}/node"
+cp -RL "${HERE}/node/." "${DEST}/node/"
+chmod +x "${DEST}/node/bin/node" 2>/dev/null || true
+NODE_BIN="${DEST}/node/bin/node"
+NPM_CLI_JS="${DEST}/node/lib/node_modules/npm/bin/npm-cli.js"
+PI_TARBALL="$(ls "${BUNDLE_ROOT}/pi"/mariozechner-pi-coding-agent-*.tgz 2>/dev/null | head -1)"
+[[ -x "${NODE_BIN}" && -f "${NPM_CLI_JS}" && -f "${PI_TARBALL}" ]] \
+  || { echo "bundled node or pi tarball missing under ${BUNDLE_ROOT}"; exit 1; }
+echo "installing Pi Coding Agent from bundled Node + npm cache..."
+PI_TELEMETRY=0 PI_SKIP_VERSION_CHECK=1 \
+  "${NODE_BIN}" "${NPM_CLI_JS}" install -g \
+    --prefix "${DEST}/node" \
+    --offline --cache "${BUNDLE_ROOT}/pi/npm-cache" \
+    "${PI_TARBALL}"
+
 mkdir -p "${HOME}/.pi/agent"
 cat > "${HOME}/.pi/agent/settings.json" <<JSON
 {
@@ -425,18 +494,52 @@ JSON
 
 mkdir -p "${HOME}/.local/bin"
 ln -sf "${DEST}/opencode/opencode" "${HOME}/.local/bin/opencode"
-case ":${PATH}:" in
-  *":${HOME}/.local/bin:"*) ;;
-  *) echo "note: add ~/.local/bin to PATH (export PATH=\"\${HOME}/.local/bin:\${PATH}\") to run 'opencode' directly." ;;
-esac
+# Wrapper for pi: invoke bundled node with pi's resolved cli.js, no PATH
+# pollution and no dependence on system node.
+PI_BIN_REAL="$(realpath "${DEST}/node/bin/pi")"
+cat > "${HOME}/.local/bin/pi" <<PI_WRAP
+#!/bin/sh
+exec "${NODE_BIN}" "${PI_BIN_REAL}" "\$@"
+PI_WRAP
+chmod +x "${HOME}/.local/bin/pi"
 
-echo "OK. New shell, then: opencode   (or: ${DEST}/opencode/opencode)"
+# Make sure ~/.local/bin is on the user's PATH for new shells. Idempotent
+# marker block, mirrors pi_privacy.sh.
+LOCAL_BIN_BEGIN='# >>> slopcode-infra ~/.local/bin >>>'
+LOCAL_BIN_END='# <<< slopcode-infra ~/.local/bin <<<'
+LOCAL_BIN_BLOCK='case ":${PATH}:" in *":${HOME}/.local/bin:"*) ;; *) export PATH="${HOME}/.local/bin:${PATH}" ;; esac'
+ensure_local_bin_on_path() {
+  local rc="$1"
+  [[ -e "${rc}" || "${rc}" == "${HOME}/.profile" ]] || return 0
+  [[ -e "${rc}" ]] || : > "${rc}"
+  python3 - "${rc}" "${LOCAL_BIN_BEGIN}" "${LOCAL_BIN_END}" "${LOCAL_BIN_BLOCK}" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+begin, end, body = sys.argv[2], sys.argv[3], sys.argv[4]
+text = p.read_text() if p.exists() else ""
+block = f"{begin}\n{body}\n{end}\n"
+if begin in text and end in text:
+    pre, rest = text.split(begin, 1)
+    _, post = rest.split(end, 1)
+    new = pre.rstrip() + ("\n\n" if pre.strip() else "") + block + post.lstrip()
+else:
+    new = text.rstrip() + ("\n\n" if text.strip() else "") + block
+p.write_text(new)
+PY
+}
+ensure_local_bin_on_path "${HOME}/.profile"
+[[ -e "${HOME}/.bashrc"   ]] && ensure_local_bin_on_path "${HOME}/.bashrc"   || true
+[[ -e "${HOME}/.zshrc"    ]] && ensure_local_bin_on_path "${HOME}/.zshrc"    || true
+[[ -e "${HOME}/.zprofile" ]] && ensure_local_bin_on_path "${HOME}/.zprofile" || true
+
+echo "OK. New shell, then: opencode   pi   (binaries under ~/.local/bin)"
 EOF
   chmod +x "${t}/install.sh"
 }
 
 build_mac_m1() {
   local t="${OUT}/mac-m1"
+  rm -rf "${t}/llama.cpp" "${t}/opencode" "${t}/node"
   mkdir -p "${t}/llama.cpp" "${t}/opencode"
   read -r tag url <<< "$(resolve_llamacpp_asset "macos-arm64" || die "no macos-arm64 asset")"
   echo "mac-m1: llama.cpp ${tag}"
@@ -446,6 +549,8 @@ build_mac_m1() {
   echo "mac-m1: opencode ${oc_tag}"
   fetch_archive "${oc_url}" "${t}/opencode"
   chmod +x "${t}/opencode/opencode" 2>/dev/null || true
+
+  prepare_node_runtime "${t}" darwin-arm64
 
   install -m 755 "${SCRIPT_DIR}/opencode_privacy.sh" "${t}/opencode_privacy.sh"
   install -m 755 "${SCRIPT_DIR}/pi_privacy.sh" "${t}/pi_privacy.sh"
@@ -619,12 +724,22 @@ JSON
 bash "${HERE}/opencode_privacy.sh"
 bash "${HERE}/pi_privacy.sh"
 
-if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-  echo "installing Pi Coding Agent from bundled npm cache..."
-  bash "${BUNDLE_ROOT}/pi/install-unix.sh"
-else
-  echo "note: node/npm not found; skipping Pi install"
-fi
+# Bundled Node.js LTS + offline npm cache (no system node/npm, no admin).
+mkdir -p "${DEST}/node"
+cp -RL "${HERE}/node/." "${DEST}/node/"
+chmod +x "${DEST}/node/bin/node" 2>/dev/null || true
+NODE_BIN="${DEST}/node/bin/node"
+NPM_CLI_JS="${DEST}/node/lib/node_modules/npm/bin/npm-cli.js"
+PI_TARBALL="$(ls "${BUNDLE_ROOT}/pi"/mariozechner-pi-coding-agent-*.tgz 2>/dev/null | head -1)"
+[[ -x "${NODE_BIN}" && -f "${NPM_CLI_JS}" && -f "${PI_TARBALL}" ]] \
+  || { echo "bundled node or pi tarball missing under ${BUNDLE_ROOT}"; exit 1; }
+echo "installing Pi Coding Agent from bundled Node + npm cache..."
+PI_TELEMETRY=0 PI_SKIP_VERSION_CHECK=1 \
+  "${NODE_BIN}" "${NPM_CLI_JS}" install -g \
+    --prefix "${DEST}/node" \
+    --offline --cache "${BUNDLE_ROOT}/pi/npm-cache" \
+    "${PI_TARBALL}"
+
 mkdir -p "${HOME}/.pi/agent"
 cat > "${HOME}/.pi/agent/settings.json" <<JSON
 {
@@ -666,10 +781,39 @@ JSON
 
 mkdir -p "${HOME}/.local/bin"
 ln -sf "${DEST}/opencode/opencode" "${HOME}/.local/bin/opencode"
-case ":${PATH}:" in
-  *":${HOME}/.local/bin:"*) ;;
-  *) echo "note: add ~/.local/bin to PATH (export PATH=\"\${HOME}/.local/bin:\${PATH}\") to run 'opencode' directly." ;;
-esac
+PI_BIN_REAL="$(realpath "${DEST}/node/bin/pi")"
+cat > "${HOME}/.local/bin/pi" <<PI_WRAP
+#!/bin/sh
+exec "${NODE_BIN}" "${PI_BIN_REAL}" "\$@"
+PI_WRAP
+chmod +x "${HOME}/.local/bin/pi"
+
+LOCAL_BIN_BEGIN='# >>> slopcode-infra ~/.local/bin >>>'
+LOCAL_BIN_END='# <<< slopcode-infra ~/.local/bin <<<'
+LOCAL_BIN_BLOCK='case ":${PATH}:" in *":${HOME}/.local/bin:"*) ;; *) export PATH="${HOME}/.local/bin:${PATH}" ;; esac'
+ensure_local_bin_on_path() {
+  local rc="$1"
+  [[ -e "${rc}" || "${rc}" == "${HOME}/.profile" ]] || return 0
+  [[ -e "${rc}" ]] || : > "${rc}"
+  python3 - "${rc}" "${LOCAL_BIN_BEGIN}" "${LOCAL_BIN_END}" "${LOCAL_BIN_BLOCK}" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+begin, end, body = sys.argv[2], sys.argv[3], sys.argv[4]
+text = p.read_text() if p.exists() else ""
+block = f"{begin}\n{body}\n{end}\n"
+if begin in text and end in text:
+    pre, rest = text.split(begin, 1)
+    _, post = rest.split(end, 1)
+    new = pre.rstrip() + ("\n\n" if pre.strip() else "") + block + post.lstrip()
+else:
+    new = text.rstrip() + ("\n\n" if text.strip() else "") + block
+p.write_text(new)
+PY
+}
+ensure_local_bin_on_path "${HOME}/.profile"
+[[ -e "${HOME}/.bashrc"   ]] && ensure_local_bin_on_path "${HOME}/.bashrc"   || true
+[[ -e "${HOME}/.zshrc"    ]] && ensure_local_bin_on_path "${HOME}/.zshrc"    || true
+[[ -e "${HOME}/.zprofile" ]] && ensure_local_bin_on_path "${HOME}/.zprofile" || true
 
 echo
 echo "waiting for /v1/models on :8080 (up to 900s)..."
@@ -683,13 +827,14 @@ while : ; do
   sleep 2
 done
 
-echo "OK. New shell, then: opencode   (or: ${DEST}/opencode/opencode)"
+echo "OK. New shell, then: opencode   pi   (binaries under ~/.local/bin)"
 EOF
   chmod +x "${t}/install.sh"
 }
 
 build_windows_arc() {
   local t="${OUT}/windows-arc"
+  rm -rf "${t}/llama.cpp" "${t}/opencode" "${t}/node"
   mkdir -p "${t}/llama.cpp" "${t}/opencode"
   read -r tag url <<< "$(resolve_llamacpp_asset "win-vulkan-x64" || die "no win-vulkan-x64 asset")"
   echo "windows-arc: llama.cpp ${tag}"
@@ -698,6 +843,8 @@ build_windows_arc() {
   read -r oc_tag oc_url <<< "$(resolve_opencode_asset "opencode-windows-x64.zip" || die "no opencode windows-x64 asset")"
   echo "windows-arc: opencode ${oc_tag}"
   fetch_archive "${oc_url}" "${t}/opencode"
+
+  prepare_node_runtime "${t}" win-x64
 
   cat > "${t}/start.bat" <<'EOF'
 @echo off
@@ -756,15 +903,17 @@ REM new slopcode-llamacpp shortcut doesn't run alongside a stale one.
 if exist "%STARTUP%\devstral-llamacpp.bat" del /Q "%STARTUP%\devstral-llamacpp.bat" >nul
 if exist "%LEGACY_DEST%" rmdir /S /Q "%LEGACY_DEST%" >nul 2>&1
 
-echo [1/6] creating %DEST%
+echo [1/7] creating %DEST%
 if not exist "%DEST%" mkdir "%DEST%"
 if not exist "%DEST%\llama.cpp" mkdir "%DEST%\llama.cpp"
 if not exist "%DEST%\opencode" mkdir "%DEST%\opencode"
+if not exist "%DEST%\node" mkdir "%DEST%\node"
 if not exist "%DEST%\models" mkdir "%DEST%\models"
 
-echo [2/6] copying binaries and model (this takes a while for the GGUF)...
+echo [2/7] copying binaries, bundled node, and model (this takes a while for the GGUF)...
 xcopy /E /Y /I /Q "%HERE%llama.cpp\*" "%DEST%\llama.cpp\" >nul
 xcopy /E /Y /I /Q "%HERE%opencode\*" "%DEST%\opencode\" >nul
+xcopy /E /Y /I /Q "%HERE%node\*" "%DEST%\node\" >nul
 xcopy /Y /I /Q "%BUNDLE_ROOT%\models\Qwen_Qwen3.6-35B-A3B-Q4_K_M*.gguf" "%DEST%\models\" >nul
 xcopy /Y /I /Q "%BUNDLE_ROOT%\models\mmproj-Qwen_Qwen3.6-35B-A3B-*.gguf" "%DEST%\models\" >nul
 
@@ -779,7 +928,7 @@ if not exist "%MMPROJ%" (
   exit /b 1
 )
 
-echo [3/6] detecting physical cores and writing %DEST%\run-llamacpp.bat
+echo [3/7] detecting physical cores and writing %DEST%\run-llamacpp.bat
 set THREADS=
 powershell -NoProfile -Command "try { [Math]::Max(2, (Get-CimInstance Win32_Processor | Measure-Object -Sum NumberOfCores).Sum - 2) } catch { [Math]::Max(2, [int]($env:NUMBER_OF_PROCESSORS) / 2 - 1) }" > "%TEMP%\slopcode_threads.txt" 2>nul
 if exist "%TEMP%\slopcode_threads.txt" (
@@ -792,11 +941,11 @@ echo     using --threads !THREADS! --threads-http 4
 > "%DEST%\run-llamacpp.bat" echo @echo off
 >> "%DEST%\run-llamacpp.bat" echo start "slopcode-llamacpp" /MIN "%DEST%\llama.cpp\llama-server.exe" -m "%MODEL%" --mmproj "%MMPROJ%" -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -b 2048 -ub 1024 -ngl 99 -fa on --n-cpu-moe 35 -np 1 --threads !THREADS! --threads-http 4 --alias qwen --jinja --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0.0 --repeat-penalty 1.0 --reasoning-format deepseek --reasoning-budget 4096 --no-context-shift --reasoning on --host 0.0.0.0 --port 8080
 
-echo [4/6] installing Startup shortcut at "%STARTUP%\slopcode-llamacpp.bat"
+echo [4/7] installing Startup shortcut at "%STARTUP%\slopcode-llamacpp.bat"
 if not exist "%STARTUP%" mkdir "%STARTUP%"
 copy /Y "%DEST%\run-llamacpp.bat" "%STARTUP%\slopcode-llamacpp.bat" >nul
 
-echo [5/6] writing OpenCode config to %OC_CFG%
+echo [5/7] writing OpenCode config to %OC_CFG%
 if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >  "%OC_CFG%" echo {
 >> "%OC_CFG%" echo   "$schema": "https://opencode.ai/config.json",
@@ -829,7 +978,7 @@ if not exist "%OC_CFG_DIR%" mkdir "%OC_CFG_DIR%"
 >> "%OC_CFG%" echo   }
 >> "%OC_CFG%" echo }
 
-echo [6/6] pinning opencode privacy env vars in HKCU\Environment (no admin)
+echo [6/7] pinning opencode privacy env vars in HKCU\Environment (no admin)
 setx OPENCODE_DISABLE_AUTOUPDATE 1 >nul
 setx OPENCODE_DISABLE_SHARE 1 >nul
 setx OPENCODE_DISABLE_MODELS_FETCH 1 >nul
@@ -839,17 +988,25 @@ setx OPENCODE_DISABLE_EMBEDDED_WEB_UI 1 >nul
 setx PI_TELEMETRY 0 >nul
 setx PI_SKIP_VERSION_CHECK 1 >nul
 
-where node >nul 2>nul
-set HAS_NODE=%ERRORLEVEL%
-where npm >nul 2>nul
-set HAS_NPM=%ERRORLEVEL%
-if "%HAS_NODE%%HAS_NPM%"=="00" (
-  echo Installing Pi Coding Agent from bundled npm cache...
-  call "%BUNDLE_ROOT%\pi\install-windows.bat"
-  if errorlevel 1 exit /b 1
-) else (
-  echo note: node/npm not found; skipping Pi install
+echo [7/7] installing Pi Coding Agent from bundled Node + npm cache (no system node, no admin)
+set NODE_EXE=%DEST%\node\node.exe
+set NPM_CLI_JS=%DEST%\node\node_modules\npm\bin\npm-cli.js
+set PI_TARBALL=
+for %%F in ("%BUNDLE_ROOT%\pi\mariozechner-pi-coding-agent-*.tgz") do set PI_TARBALL=%%~fF
+if not exist "%NODE_EXE%" (
+  echo bundled node missing under %DEST%\node
+  exit /b 1
 )
+if not exist "%NPM_CLI_JS%" (
+  echo bundled npm-cli.js missing under %DEST%\node\node_modules\npm
+  exit /b 1
+)
+if not defined PI_TARBALL (
+  echo pi tarball missing under %BUNDLE_ROOT%\pi
+  exit /b 1
+)
+"%NODE_EXE%" "%NPM_CLI_JS%" install -g --prefix "%DEST%\node" --offline --cache "%BUNDLE_ROOT%\pi\npm-cache" "%PI_TARBALL%"
+if errorlevel 1 exit /b 1
 
 set PI_CFG_DIR=%USERPROFILE%\.pi\agent
 if not exist "%PI_CFG_DIR%" mkdir "%PI_CFG_DIR%"
@@ -875,7 +1032,7 @@ set PI_MODELS=%PI_CFG_DIR%\models.json
 >> "%PI_MODELS%" echo           "name": "Qwen3.6 35B A3B Q4 + KV-Q8 (Local llama.cpp)",
 >> "%PI_MODELS%" echo           "reasoning": true,
 >> "%PI_MODELS%" echo           "input": ["text", "image"],
->> "%PI_MODELS%" echo           "contextWindow": 131072,
+>> "%PI_MODELS%" echo           "contextWindow": 262144,
 >> "%PI_MODELS%" echo           "maxTokens": 16384,
 >> "%PI_MODELS%" echo           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
 >> "%PI_MODELS%" echo         }
@@ -884,15 +1041,18 @@ set PI_MODELS=%PI_CFG_DIR%\models.json
 >> "%PI_MODELS%" echo   }
 >> "%PI_MODELS%" echo }
 
-REM Idempotent prepend of the opencode dir to user PATH via PowerShell
-REM (reads HKCU\Environment directly so successive runs don't duplicate).
+REM Idempotent prepend of the opencode and bundled node dirs to user PATH
+REM via PowerShell (reads HKCU\Environment directly so successive runs don't
+REM duplicate). After install, both opencode and pi are reachable in any new
+REM cmd/powershell window without admin and without a system node.
 set OC_BIN_DIR=%DEST%\opencode
+set NODE_BIN_DIR=%DEST%\node
 powershell -NoProfile -Command ^
   "$u = [Environment]::GetEnvironmentVariable('Path','User');" ^
-  "$d = '%OC_BIN_DIR%';" ^
+  "$dirs = @('%OC_BIN_DIR%', '%NODE_BIN_DIR%');" ^
   "if ($null -eq $u) { $u = '' }" ^
-  "$parts = $u.Split(';') | Where-Object { $_ -and $_ -ne $d };" ^
-  "$new = (@($d) + $parts) -join ';';" ^
+  "$parts = $u.Split(';') | Where-Object { $_ -and -not ($dirs -contains $_) };" ^
+  "$new = ($dirs + $parts) -join ';';" ^
   "[Environment]::SetEnvironmentVariable('Path', $new, 'User')"
 echo     (env vars and PATH take effect in new cmd/powershell windows, not this one)
 
@@ -904,6 +1064,7 @@ echo.
 echo OK. Wait ~30s for the model to load, then open a NEW command prompt
 echo so the OPENCODE_DISABLE_* env vars and PATH are picked up, and run:
 echo     opencode
+echo     pi
 echo (to stop the server: open Task Manager and end llama-server.exe)
 EOF
 }
@@ -912,20 +1073,29 @@ cat > "${OUT}/README.txt" <<'EOF'
 slopcode USB bundle (Qwen3.6 local stack)
 =========================================
 
-Three self-contained per-OS directories plus a shared models/ folder:
+Three self-contained per-OS directories plus a shared models/ folder.
+Every per-OS directory carries its own Node.js LTS, so Pi installs fully
+offline and does not need a pre-existing node/npm on the host.
 
   linux-cuda/   Linux + Vulkan/CUDA GPU (install.sh, no sudo)
                   -> single 35B-A3B :8080, 256K window, --n-cpu-moe 35,
                      image input via mmproj
+                  -> bundled node/ used to install Pi offline into ~/.local/
+                     slopcode/node and expose it as ~/.local/bin/pi
   mac-m1/       Apple Silicon Mac (install.sh, no sudo)
                   -> single 35B-A3B :8080, 128K window, Metal full offload,
                      image input via mmproj. Mirrors install_macbook_launchagent.sh.
                      The Mac Studio dual-instance layout is set up directly
                      from the slopcode-infra repo, not from the USB.
+                  -> bundled node/ used to install Pi offline into the
+                     install dir and expose it as ~/.local/bin/pi
   windows-arc/  Windows + Vulkan GPU (install.bat, no admin)
                   -> single 35B-A3B :8080, 256K window, --n-cpu-moe 35,
                      image input via mmproj
-  pi/           Pi Coding Agent npm tarball + offline npm cache
+                  -> bundled node/ used to install Pi offline into
+                     %USERPROFILE%\slopcode\node, prepended to user PATH
+  pi/           Pi Coding Agent npm tarball + fully populated offline cache
+                (consumed by every per-OS installer; no install-*.sh shims)
   models/       Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf       (~20 GB, all platforms)
                 mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf (~1 GB,  vision projector,
                                                        all platforms)
@@ -939,18 +1109,19 @@ To install on a target machine:
   Linux/Mac:   ./<target>/install.sh
   Windows:     .\windows-arc\install.bat
 
-The installer copies llama.cpp + opencode + the model into the user's
-home directory, registers a user-level service (systemd --user on Linux,
-a launchd user agent on Mac, a Startup shortcut on Windows), runs the
-bundled offline npm install for the Pi Coding Agent, and writes OpenCode
-+ Pi configs that disable every outbound network call beyond the local
-LLM endpoint. Image input is enabled via the bundled vision projector.
+The installer copies llama.cpp + opencode + bundled node + the model into
+the user's home directory, registers a user-level service (systemd --user
+on Linux, a launchd user agent on Mac, a Startup shortcut on Windows),
+runs an offline `npm install -g --prefix <dest>/node --offline --cache
+<bundle>/pi/npm-cache` using the bundled Node, and writes OpenCode + Pi
+configs that disable every outbound network call beyond the local LLM
+endpoint. Image input is enabled via the bundled vision projector. No
+sudo, no admin, no internet required at install time.
 
 Smoke test:
   curl -s http://127.0.0.1:8080/v1/models
 
-Then launch opencode from the bundle's opencode/ directory, or pi if node/npm
-were installed and the bundled offline npm install succeeded.
+Then in a new shell run `opencode` or `pi` directly.
 EOF
 
 prepare_pi_npm_bundle

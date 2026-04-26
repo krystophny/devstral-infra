@@ -88,7 +88,9 @@ scripts/
   install_mac_launchagents.sh   macOS launchd user agents for the dual-instance stack
   opencode_install.sh           curl|bash (online) or OPENCODE_OFFLINE_ARCHIVE (USB)
   opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json (dual on Mac, single on PC)
-  build_bundle.sh               build USB-ready per-OS trees with embedded installers
+  build_bundle.sh               build USB-ready per-OS trees with embedded installers,
+                                bundled Node.js LTS (linux-x64/darwin-arm64/win-x64),
+                                and a fully populated offline npm cache for Pi
   usb_format.sh                 exFAT format + skeleton (requires sudo, typed confirm)
 
 ci/
@@ -219,6 +221,20 @@ deliberately and update this file.
 The USB layout ships the 20 GB GGUF once at the bundle root. Per-OS `start`
 scripts reference `../models/…`. exFAT is required (FAT32 chokes at 4 GB per
 file); `usb_format.sh` handles the format.
+
+Each per-OS directory also carries its own Node.js LTS under `node/`
+(linux-x64, darwin-arm64, win-x64). The shared `pi/` directory holds the
+Pi tarball and a fully populated offline npm cache. The per-OS installer
+copies its `node/` into the install destination, runs `npm install -g`
+with `--prefix <dest>/node --offline --cache <bundle>/pi/npm-cache`, and
+exposes Pi as `~/.local/bin/pi` (Unix) or via a user-PATH prepend
+(Windows). No system Node, no sudo, no admin, no internet at install
+time. Outside the USB path, `scripts/pi_install.sh` keeps using the
+system npm — unchanged.
+
+The Node.js version is auto-resolved to the latest LTS via
+`https://nodejs.org/dist/index.json` at build time; override with
+`NODE_VERSION=v22.x.x scripts/build_bundle.sh ...`.
 
 ## Testing
 
