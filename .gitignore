@@ -3,6 +3,10 @@
 .run/
 .env
 .env.*
+*.env
+!*.env.example
+secrets/
+local/
 *.token
 *.secret
 .vibe/
