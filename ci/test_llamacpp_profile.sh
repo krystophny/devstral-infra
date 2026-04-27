@@ -263,6 +263,41 @@ test_opencode_config() {
   fi
 }
 
+test_opencode_config_slopgate() {
+  echo "TEST: SLOPGATE_LEADER points opencode at the slopgate balancer"
+  local home_dir="${TMPDIR}/home-config-slopgate"
+  local config_path="${TMPDIR}/opencode-slopgate.json"
+  mkdir -p "${home_dir}"
+
+  HOME="${home_dir}" \
+  OPENCODE_CONFIG_PATH="${config_path}" \
+  OPENCODE_SKIP_PRIVACY_ENV=true \
+  SLOPGATE_LEADER=10.0.0.99 \
+  bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
+
+  local ok=1
+  grep -q '"baseURL": "http://10.0.0.99:8080/v1"' "${config_path}" || ok=0
+  grep -q '"X-Slopgate-Session"' "${config_path}" || ok=0
+  [[ -f "${home_dir}/.config/slopgate/opencode-session-id" ]] || ok=0
+
+  local explicit_path="${TMPDIR}/opencode-slopgate-explicit.json"
+  HOME="${home_dir}" \
+  OPENCODE_CONFIG_PATH="${explicit_path}" \
+  OPENCODE_SKIP_PRIVACY_ENV=true \
+  SLOPGATE_LEADER=10.0.0.99:9090 \
+  bash "${REPO_ROOT}/scripts/opencode_set_llamacpp.sh" >/dev/null
+
+  grep -q '"baseURL": "http://10.0.0.99:9090/v1"' "${explicit_path}" || ok=0
+
+  if [[ "${ok}" == "1" ]]; then
+    echo "PASS: SLOPGATE_LEADER baseURL + X-Slopgate-Session header set"
+  else
+    echo "FAIL: opencode SLOPGATE_LEADER branch did not produce expected config"
+    cat "${config_path}"
+    return 1
+  fi
+}
+
 test_pi_config() {
   echo "TEST: Pi llama.cpp config generation"
   local home_dir="${TMPDIR}/home-pi"
@@ -593,6 +628,7 @@ test_server_start_loopback_slopgate || FAILED=$((FAILED + 1))
 test_server_exec_mode || FAILED=$((FAILED + 1))
 test_server_legacy_cpu_moe_fallback || FAILED=$((FAILED + 1))
 test_opencode_config || FAILED=$((FAILED + 1))
+test_opencode_config_slopgate || FAILED=$((FAILED + 1))
 test_pi_config || FAILED=$((FAILED + 1))
 test_models_default_alias || FAILED=$((FAILED + 1))
 test_setup_backend_selection || FAILED=$((FAILED + 1))
