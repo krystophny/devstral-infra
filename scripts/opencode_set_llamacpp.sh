@@ -110,23 +110,6 @@ SMALL_MODEL="${OPENCODE_LOCAL_SMALL_MODEL:-llamacpp/qwen}"
 PROVIDER_BLOCK="$(provider_block_single qwen "Qwen3.6 35B A3B Q4 + KV-Q8 (Local)")"
 DISABLED='"disabled_providers": ["exa", "opencode", "llmgateway", "github-copilot", "copilot", "openai", "anthropic", "google", "mistral", "groq", "xai", "ollama"]'
 
-# MCP servers: opencode talks to the two local MCP servers used by every
-# CRUD calendar/contacts/tasks, workspace items/artifacts, slopshell canvas,
-# OData. Both are local-only (127.0.0.1), no outbound traffic. Slopbox and the
-# meeting-notes generator rely on these for full meeting context.
-MCP_BLOCK=$(cat <<'JSON'
-  "mcp": {
-    "sloppy": {
-      "type": "remote",
-      "enabled": true
-    },
-      "type": "remote",
-      "enabled": true
-    }
-  },
-JSON
-)
-
 cat > "${CONFIG_PATH}" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
@@ -144,7 +127,6 @@ cat > "${CONFIG_PATH}" <<EOF
   "experimental": {
     "openTelemetry": false
   },
-${MCP_BLOCK}
   ${DISABLED},
 ${PROVIDER_BLOCK}
 }
@@ -162,3 +144,4 @@ echo "- baseURL:    ${BASE_URL}"
 echo "- title:      disabled"
 echo "- permission: allow"
 echo "- thinking budget: ${THINKING_BUDGET}"
+echo "- mcp servers: (none — add via per-tool installers if you use any)"
