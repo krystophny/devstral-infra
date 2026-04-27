@@ -244,6 +244,38 @@ requests against a cold-ARP follower hits Darwin's `EHOSTUNREACH` rate
 limit and returns 502s. The prober keeps the leader→follower path warm
 without affecting routing decisions.
 
+**Network hardening.** Every `llama-server` in the cluster binds to a
+WireGuard address only — never `0.0.0.0`, never the host's TUG-LAN IP. The
+leader's local llama-server listens on `127.0.0.1:8081`; cluster
+communication happens over the WG mesh `10.77.0.0/24`. Followers without
+root (Linux + admin-shared Mac) use [`wireproxy`](https://github.com/pufferffish/wireproxy)
+as an unprivileged userspace WG client: the static Go binary lives in
+`~/.local/bin/wireproxy`, config in `~/.config/wireproxy/slopgate.conf`,
+service via systemd-user (Linux) or `~/Library/LaunchAgents/io.slopcode.
+wireproxy.plist` (macOS). wireproxy's `[TCPServerTunnel]` accepts inbound
+WG traffic on `<wg-addr>:8080` and forwards to the local llama-server on
+loopback. wireproxy's `[TCPClientTunnel]` exposes the leader's management
+endpoint as `127.0.0.1:18085`, which the slopgate-agent's
+`SLOPGATE_LEADER_MANAGEMENT_ADDR` points at. Net effect: no llama.cpp port
+on TUG LAN at all; chat content rides ChaCha20-Poly1305-encrypted UDP
+between every node. The slopgate balancer (`:8080` proxy, `:8085`
+management, `:8086` dashboard) deliberately stays open on LAN/WG/loopback
+because it exposes only metadata (agent counts, slot counts, addresses) —
+no request bodies, no prompts, no chat history.
+
+**Web UI off.** Every llama-server invocation includes `--no-webui` to
+disable the bundled chat UI. The web UI persists conversation history in
+the browser's localStorage and could leak prior sessions if anyone reaches
+it. The pure-API path (`/v1/chat/completions`, `/v1/audio/transcriptions`)
+is untouched.
+
+**Slots endpoint.** Slopgate's balancer rejects `GET /slots` (the
+`--slots-endpoint-enable` flag is *not* passed in `install_slopgate_
+leader.sh`). The KV-headroom routing filter keeps working because each
+node's local slopgate-agent reads `/slots` from its own loopback/WG-bound
+llama-server and reports headroom up via `/status_update` — nothing
+content-bearing crosses the wire.
+
 ## Whisper transcription server
 
 `whisper.cpp` runs alongside llama-server on the same box, exposing an
@@ -287,7 +319,11 @@ Explicitly out of scope — do not add LM Studio, vLLM, vLLM-MLX, MLX-LM, oMLX,
 `security_harden.sh`, dual-instance local/fast servers, the macOS Qwen 27B
 dense companion as a default-installed model, intentee/paddler v2+ (the
 embedded-llama.cpp rewrite — slopgate stays on the v1.x transparent-proxy
-line so we keep control of llama-server flags), or anything that auto-
+line so we keep control of llama-server flags), llama-server bound to
+`0.0.0.0` on any cluster node (it must always bind WG-only or loopback),
+the bundled llama.cpp web UI on a network-reachable interface (always
+launch with `--no-webui`), the slopgate balancer's `--slots-endpoint-
+enable` flag (it leaks per-slot prompt content), or anything that auto-
 downloads another model family beyond the small manual alias list in
 `scripts/llamacpp_models.py`. If one of those becomes useful again, add it
 deliberately and update this file.
