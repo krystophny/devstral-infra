@@ -235,6 +235,15 @@ units (Linux) or launchd user agents (macOS). No sudo.
 `http://<wg-ip>:8080/v1` and a stable `X-Slopgate-Session` header is added
 for sticky multi-turn routing.
 
+**ARP / neighbour warmup.** The balancer runs an UpstreamProberService that
+opens a short-lived TCP connection to each agent's `external_llamacpp_addr`
+every 5 s. The leader receives heartbeats from followers (which keep ARP
+warm in the follower→leader direction), but never sends packets back until
+a real request arrives — so without the prober, a burst of concurrent
+requests against a cold-ARP follower hits Darwin's `EHOSTUNREACH` rate
+limit and returns 502s. The prober keeps the leader→follower path warm
+without affecting routing decisions.
+
 ## Whisper transcription server
 
 `whisper.cpp` runs alongside llama-server on the same box, exposing an
