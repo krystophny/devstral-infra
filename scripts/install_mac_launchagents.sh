@@ -148,6 +148,7 @@ ${mmproj_xml}    <string>-c</string><string>2097152</string>
     <string>--reasoning-format</string><string>deepseek</string>
     <string>--reasoning-budget</string><string>${REASONING_BUDGET}</string>
     <string>--no-context-shift</string>
+    <string>--no-webui</string>
     <string>--host</string><string>${LLAMACPP_HOST_BIND}</string>
     <string>--port</string><string>${LLAMACPP_PORT_BIND}</string>
   </array>

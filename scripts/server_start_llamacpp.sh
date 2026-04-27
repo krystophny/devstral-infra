@@ -245,6 +245,7 @@ CMD=(
   --alias "${SERVED_ALIAS}"
   --jinja
   -np "${PARALLEL}"
+  --no-webui
 )
 if [[ -n "${MMPROJ_PATH}" ]]; then
   CMD+=(--mmproj "${MMPROJ_PATH}")
