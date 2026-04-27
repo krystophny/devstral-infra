@@ -76,7 +76,16 @@ EOF
     [[ "${output}" == *"--threads-http 4"* ]] || threads_ok=0
   fi
 
-  if [[ "${output}" == *"-c 262144"* && \
+  local context_expected np_expected
+  if [[ "${platform}" == "Darwin" ]]; then
+    context_expected="-c 1048576"
+    np_expected="-np 4"
+  else
+    context_expected="-c 262144"
+    np_expected="-np 1"
+  fi
+
+  if [[ "${output}" == *"${context_expected}"* && \
         "${output}" == *"--cache-type-k q8_0"* && \
         "${output}" == *"--cache-type-v q8_0"* && \
         "${output}" == *"-fa on"* && \
@@ -87,12 +96,12 @@ EOF
         "${output}" == *"--top-p 0.95"* && \
         "${output}" == *"--top-k 20"* && \
         "${output}" == *"--port ${port}"* && \
-        "${output}" == *"-np 1"* && \
+        "${output}" == *"${np_expected}"* && \
         "${output}" == *"-ub 1024"* && \
         "${output}" == *"Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"* && \
         "${moe_ok}" == "1" && \
         "${threads_ok}" == "1" ]]; then
-    echo "PASS: launcher emits the blessed single-instance profile (-np 1, -ub 1024, --n-cpu-moe 35)"
+    echo "PASS: launcher emits the blessed profile for $(uname -s) (${np_expected}, ${context_expected})"
   else
     echo "FAIL: launcher profile mismatch (moe_ok=${moe_ok} threads_ok=${threads_ok})"
     echo "${output}"
@@ -176,10 +185,16 @@ EOF
     bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
   )"
 
+  local np_expected
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    np_expected="-np 4"
+  else
+    np_expected="-np 1"
+  fi
   if [[ "${output}" == *"--alias qwen-27b"* && \
         "${output}" == *"--port ${port}"* && \
         "${output}" == *"- instance: 27b"* && \
-        "${output}" == *"-np 1"* && \
+        "${output}" == *"${np_expected}"* && \
         "${output}" == *"-ub 1024"* ]]; then
     echo "PASS: instance suffix and served alias take effect"
   else
@@ -226,31 +241,17 @@ test_opencode_config() {
   grep -q '"disabled_providers": \["exa",' "${config_path}" || common_ok=0
 
   local platform_ok=1
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    local ram_gb
-    ram_gb="$(detect_total_ram_gb)"
-    if [[ "${ram_gb}" -lt 64 ]]; then
-      # Single-instance Mac (< 64 GB): 35B-A3B on :8080, 128K context.
-      grep -q '"model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
-      grep -q '"small_model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
-      grep -q '"context": 131072' "${config_path}" || platform_ok=0
-      grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
-      grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local)' "${config_path}" || platform_ok=0
-    else
-      # Dual-instance Mac (>= 64 GB): 27B on :8081 + 35B-A3B on :8080.
-      grep -q '"model": "llamacpp/qwen-27b"' "${config_path}" || platform_ok=0
-      grep -q '"small_model": "llamacpp-moe/qwen-35b-a3b"' "${config_path}" || platform_ok=0
-      grep -q '"context": 262144' "${config_path}" || platform_ok=0
-      grep -q 'http://127.0.0.1:8081/v1' "${config_path}" || platform_ok=0
-      grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
-      grep -q 'Qwen3.6 27B Q4 + KV-Q8 (Local dense)' "${config_path}" || platform_ok=0
-      grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local MoE)' "${config_path}" || platform_ok=0
-    fi
-  else
-    grep -q '"model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
-    grep -q '"context": 262144' "${config_path}" || platform_ok=0
-    grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
-    grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local)' "${config_path}" || platform_ok=0
+  local context_expected=262144
+  if [[ "$(uname -s)" == "Darwin" ]] && [[ "$(detect_total_ram_gb)" -lt 64 ]]; then
+    context_expected=131072
+  fi
+  grep -q '"model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
+  grep -q '"small_model": "llamacpp/qwen"' "${config_path}" || platform_ok=0
+  grep -q "\"context\": ${context_expected}" "${config_path}" || platform_ok=0
+  grep -q 'http://127.0.0.1:8080/v1' "${config_path}" || platform_ok=0
+  grep -q 'Qwen3.6 35B A3B Q4 + KV-Q8 (Local)' "${config_path}" || platform_ok=0
+  if grep -q 'qwen-27b\|qwen-35b-a3b' "${config_path}"; then
+    platform_ok=0
   fi
 
   if [[ "${common_ok}" == "1" && "${platform_ok}" == "1" ]]; then
@@ -288,25 +289,16 @@ test_pi_config() {
   grep -q '"maxTokens": 16384' "${models}" || common_ok=0
 
   local platform_ok=1
-  if [[ "$(uname -s)" == "Darwin" && "$(detect_total_ram_gb)" -ge 64 ]]; then
-    # Dual-instance Mac: 27B default on :8081, 35B-A3B with image on :8080.
-    grep -q '"defaultModel": "qwen-27b"' "${settings}" || platform_ok=0
-    grep -q '"llamacpp/qwen-27b"' "${settings}" || platform_ok=0
-    grep -q '"llamacpp-moe/qwen-35b-a3b"' "${settings}" || platform_ok=0
-    grep -q '"baseUrl": "http://127.0.0.1:8081/v1"' "${models}" || platform_ok=0
-    grep -q '"baseUrl": "http://127.0.0.1:8080/v1"' "${models}" || platform_ok=0
-    grep -q '"id": "qwen-27b"' "${models}" || platform_ok=0
-    grep -q '"id": "qwen-35b-a3b"' "${models}" || platform_ok=0
-    grep -q '"contextWindow": 262144' "${models}" || platform_ok=0
-  else
-    local context_expected=262144
-    if [[ "$(uname -s)" == "Darwin" && "$(detect_total_ram_gb)" -lt 64 ]]; then
-      context_expected=131072
-    fi
-    grep -q '"defaultModel": "qwen"' "${settings}" || platform_ok=0
-    grep -q '"baseUrl": "http://127.0.0.1:8080/v1"' "${models}" || platform_ok=0
-    grep -q '"id": "qwen"' "${models}" || platform_ok=0
-    grep -q "\"contextWindow\": ${context_expected}" "${models}" || platform_ok=0
+  local pi_context_expected=262144
+  if [[ "$(uname -s)" == "Darwin" && "$(detect_total_ram_gb)" -lt 64 ]]; then
+    pi_context_expected=131072
+  fi
+  grep -q '"defaultModel": "qwen"' "${settings}" || platform_ok=0
+  grep -q '"baseUrl": "http://127.0.0.1:8080/v1"' "${models}" || platform_ok=0
+  grep -q '"id": "qwen"' "${models}" || platform_ok=0
+  grep -q "\"contextWindow\": ${pi_context_expected}" "${models}" || platform_ok=0
+  if grep -q 'qwen-27b\|qwen-35b-a3b' "${settings}" "${models}"; then
+    platform_ok=0
   fi
 
   if [[ "${common_ok}" == "1" && "${platform_ok}" == "1" ]]; then
@@ -427,8 +419,14 @@ EOF
     grep -qx -- '--n-cpu-moe' "${stamp}" || moe_ok=0
     grep -qx -- '35' "${stamp}" || moe_ok=0
   fi
+  local np_value
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    np_value=4
+  else
+    np_value=1
+  fi
   if grep -qx -- '-np' "${stamp}" \
-    && grep -qx -- '1' "${stamp}" \
+    && grep -qx -- "${np_value}" "${stamp}" \
     && grep -qx -- '--port' "${stamp}" \
     && grep -qx -- "${port}" "${stamp}" \
     && grep -qx -- '--reasoning-budget' "${stamp}" \
@@ -436,7 +434,7 @@ EOF
     && grep -qx -- '-ub' "${stamp}" \
     && grep -qx -- '1024' "${stamp}" \
     && [[ "${moe_ok}" == "1" ]]; then
-    echo "PASS: exec-mode argv has -np 1, -ub 1024, MoE flags correct"
+    echo "PASS: exec-mode argv has -np ${np_value}, -ub 1024, MoE flags correct"
   else
     echo "FAIL: exec-mode argv did not include expected flags"
     cat "${stamp}"

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Install macOS launchd user agents for the dual-instance llama.cpp deployment
+# Install macOS launchd user agents for the slopcode llama.cpp deployment
 # plus the whisper.cpp transcription server:
-#   com.slopcode.llamacpp-35b-a3b -> 35B-A3B Q4 (MoE)   on 127.0.0.1:8080
-#   com.slopcode.llamacpp-27b     -> 27B    Q4 (dense)  on 127.0.0.1:8081
-#   com.slopcode.whisper-server   -> ggml-large-v3-turbo on 0.0.0.0:8427
+#   com.slopcode.llamacpp        -> 35B-A3B Q4 (MoE) on 0.0.0.0:8080 with
+#                                    -np 4 -c 1048576 (256K per slot)
+#   com.slopcode.whisper-server  -> ggml-large-v3-turbo on 0.0.0.0:8427
 #                                    OpenAI-compat at /v1/audio/transcriptions
 #
 # Each agent sets KeepAlive=true and RunAtLoad=true so the servers come up on
-# login and restart on crash. Legacy single-instance and devstral-named
-# labels (com.devstral.llamacpp-*, com.slopcode.llamacpp-macbook,
-# com.qwenstack.llamacpp) are booted out first.
+# login and restart on crash. Legacy dual-instance + devstral-named labels
+# (com.slopcode.llamacpp-{27b,35b-a3b}, com.devstral.llamacpp-*,
+# com.qwenstack.llamacpp, com.slopcode.llamacpp-macbook) are booted out first.
 #
 # Env overrides:
 #   LLAMACPP_SERVER_BIN  llama-server path (default: ~/.local/llama.cpp/
@@ -57,12 +57,9 @@ resolve_mmproj_optional() {
   fi
 }
 
-MODEL_35B="$(resolve_model qwen3.6-35b-a3b-q4)"
-MODEL_27B="$(resolve_model qwen3.6-27b-q4)"
-MMPROJ_35B="$(resolve_mmproj_optional qwen3.6-35b-a3b-q4)"
-MMPROJ_27B="$(resolve_mmproj_optional qwen3.6-27b-q4)"
-[[ -n "${MMPROJ_35B}" ]] || die "mmproj for qwen3.6-35b-a3b-q4 not on disk. Run: python3 ${MODELS_SCRIPT} prefetch qwen3.6-35b-a3b-q4"
-[[ -n "${MMPROJ_27B}" ]] || die "mmproj for qwen3.6-27b-q4 not on disk. Run: python3 ${MODELS_SCRIPT} prefetch qwen3.6-27b-q4"
+MODEL_PATH="$(resolve_model qwen3.6-35b-a3b-q4)"
+MMPROJ_PATH="$(resolve_mmproj_optional qwen3.6-35b-a3b-q4)"
+[[ -n "${MMPROJ_PATH}" ]] || die "mmproj for qwen3.6-35b-a3b-q4 not on disk. Run: python3 ${MODELS_SCRIPT} prefetch qwen3.6-35b-a3b-q4"
 
 bootout_if_loaded() {
   local label="$1" plist="${AGENTS_DIR}/${1}.plist"
@@ -73,14 +70,18 @@ bootout_if_loaded() {
   rm -f "${plist}"
 }
 
-# Boot out every legacy or single-instance label this project has shipped.
+# Boot out every previous label this project has shipped, including the dual-
+# instance ones (com.slopcode.llamacpp-{27b,35b-a3b}). The new single-instance
+# label is com.slopcode.llamacpp.
 for legacy in com.qwenstack.llamacpp \
               com.devstral.llamacpp-local \
               com.devstral.llamacpp-macbook \
               com.devstral.llamacpp-35b-a3b \
               com.devstral.llamacpp-27b \
               com.slopcode.llamacpp-local \
-              com.slopcode.llamacpp-macbook; do
+              com.slopcode.llamacpp-macbook \
+              com.slopcode.llamacpp-27b \
+              com.slopcode.llamacpp-35b-a3b; do
   bootout_if_loaded "${legacy}"
 done
 
@@ -93,13 +94,26 @@ wait_gone() {
   return 0
 }
 
-write_plist() {
-  local label="$1" port="$2" alias="$3" model="$4" instance="$5" mmproj="${6:-}"
+# Bind to the loopback when slopgate is locally installed (the proxy fronts
+# 0.0.0.0:8080 and llama-server moves to 127.0.0.1:8081); otherwise serve on
+# 0.0.0.0:8080 for direct LAN consumers as before.
+LLAMACPP_HOST_DEFAULT=0.0.0.0
+LLAMACPP_PORT_DEFAULT=8080
+if launchctl list 2>/dev/null | awk '{print $3}' | grep -qx 'com.slopcode.slopgate-balancer' \
+  || [[ -f "${AGENTS_DIR}/com.slopcode.slopgate-balancer.plist" ]]; then
+  LLAMACPP_HOST_DEFAULT=127.0.0.1
+  LLAMACPP_PORT_DEFAULT=8081
+fi
+LLAMACPP_HOST_BIND="${LLAMACPP_HOST:-${LLAMACPP_HOST_DEFAULT}}"
+LLAMACPP_PORT_BIND="${LLAMACPP_PORT:-${LLAMACPP_PORT_DEFAULT}}"
+
+write_llamacpp_plist() {
+  local label="com.slopcode.llamacpp"
   local plist="${AGENTS_DIR}/${label}.plist"
-  local log="${LOG_DIR_ABS}/llamacpp-${instance}.log"
+  local log="${LOG_DIR_ABS}/llamacpp.log"
   local mmproj_xml=""
-  if [[ -n "${mmproj}" ]]; then
-    mmproj_xml="    <string>--mmproj</string><string>${mmproj}</string>
+  if [[ -n "${MMPROJ_PATH}" ]]; then
+    mmproj_xml="    <string>--mmproj</string><string>${MMPROJ_PATH}</string>
 "
   fi
   cat > "${plist}" <<XML
@@ -114,16 +128,16 @@ write_plist() {
   <key>ProgramArguments</key>
   <array>
     <string>${SERVER_BIN}</string>
-    <string>-m</string><string>${model}</string>
-${mmproj_xml}    <string>-c</string><string>524288</string>
+    <string>-m</string><string>${MODEL_PATH}</string>
+${mmproj_xml}    <string>-c</string><string>1048576</string>
     <string>-b</string><string>2048</string>
     <string>-ub</string><string>512</string>
     <string>-ngl</string><string>99</string>
     <string>-fa</string><string>on</string>
-    <string>-np</string><string>2</string>
+    <string>-np</string><string>4</string>
     <string>--cache-type-k</string><string>q8_0</string>
     <string>--cache-type-v</string><string>q8_0</string>
-    <string>--alias</string><string>${alias}</string>
+    <string>--alias</string><string>qwen</string>
     <string>--jinja</string>
     <string>--temp</string><string>0.6</string>
     <string>--top-p</string><string>0.95</string>
@@ -134,8 +148,8 @@ ${mmproj_xml}    <string>-c</string><string>524288</string>
     <string>--reasoning-format</string><string>deepseek</string>
     <string>--reasoning-budget</string><string>${REASONING_BUDGET}</string>
     <string>--no-context-shift</string>
-    <string>--host</string><string>0.0.0.0</string>
-    <string>--port</string><string>${port}</string>
+    <string>--host</string><string>${LLAMACPP_HOST_BIND}</string>
+    <string>--port</string><string>${LLAMACPP_PORT_BIND}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -149,15 +163,14 @@ XML
   launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
   wait_gone "${label}" || die "failed to unload existing ${label}"
   launchctl bootstrap "gui/$(id -u)" "${plist}"
-  if [[ -n "${mmproj}" ]]; then
-    echo "loaded ${label} (port ${port}, alias ${alias}, mmproj $(basename "${mmproj}"))"
+  if [[ -n "${MMPROJ_PATH}" ]]; then
+    echo "loaded ${label} (${LLAMACPP_HOST_BIND}:${LLAMACPP_PORT_BIND}, alias qwen, -np 4 -c 1048576, mmproj $(basename "${MMPROJ_PATH}"))"
   else
-    echo "loaded ${label} (port ${port}, alias ${alias})"
+    echo "loaded ${label} (${LLAMACPP_HOST_BIND}:${LLAMACPP_PORT_BIND}, alias qwen, -np 4 -c 1048576)"
   fi
 }
 
-write_plist com.slopcode.llamacpp-35b-a3b 8080 qwen-35b-a3b "${MODEL_35B}" 35b-a3b "${MMPROJ_35B}"
-write_plist com.slopcode.llamacpp-27b     8081 qwen-27b     "${MODEL_27B}" 27b     "${MMPROJ_27B}"
+write_llamacpp_plist
 
 # whisper.cpp transcription server. Runs on Metal GPU (built with
 # -DGGML_METAL=1). Used by voxtype dictation, slopbox voice-memo classifier,
@@ -244,8 +257,7 @@ wait_ready() {
     sleep 2
   done
 }
-wait_ready 8080
-wait_ready 8081
+wait_ready "${LLAMACPP_PORT_BIND}"
 if [[ "${SKIP_WHISPER:-false}" != "true" ]]; then
   wait_ready 8427 /v1/audio/transcriptions
 fi

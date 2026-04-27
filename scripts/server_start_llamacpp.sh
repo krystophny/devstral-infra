@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Start one llama-server instance. Defaults match the blessed Qwen3.6 profile:
-#   Q8_0 KV cache, flash attention, 256K single-slot context,
+#   Q8_0 KV cache, flash attention, 256K per-slot context,
 #   partial MoE offload (--n-cpu-moe 35, -ub 1024) tuned for a 16 GB CUDA
 #   GPU coexisting with whisper-server (~1 GB) + Qwen3-TTS (~4.4 GB at synth
 #   peak) on Linux/Windows; Metal (no MoE split) on Mac; reasoning enabled.
 #
-# This script runs a single instance. For the Mac dual-instance deployment
-# (35B-A3B on 8080 + 27B on 8081) use scripts/server_start_mac.sh, which calls
-# this script twice with instance-specific ports, aliases, and file names and
-# passes LLAMACPP_PARALLEL=2 so each Mac instance keeps two slots.
+# Slot counts per platform:
+#   Linux/Windows: -np 1 -c 262144           (1 slot x 256K, 16 GB GPU cap)
+#   Mac:           -np 4 -c 1048576          (4 slots x 256K, M-series unified
+#                                             memory; the dropped 27B dense
+#                                             companion freed the budget)
 #
 # Env overrides:
 #   LLAMACPP_HOME         install dir (default ~/.local/llama.cpp)
@@ -89,7 +90,11 @@ fi
 # --- Runtime parameters ---
 HOST="${LLAMACPP_HOST:-0.0.0.0}"
 PORT="${LLAMACPP_PORT:-8080}"
-CONTEXT="${LLAMACPP_CONTEXT:-262144}"
+if [[ "${PLATFORM}" == "mac" ]]; then
+  CONTEXT="${LLAMACPP_CONTEXT:-1048576}"
+else
+  CONTEXT="${LLAMACPP_CONTEXT:-262144}"
+fi
 BATCH="${LLAMACPP_BATCH:-2048}"
 # -ub sizes the GPU compute buffer. On a 16 GB RTX 5060 Ti with --n-cpu-moe 30
 # and c=262144, -ub 1024 lands at ~11.0 GB VRAM (prefill 647 t/s, decode 39.7
@@ -99,14 +104,17 @@ BATCH="${LLAMACPP_BATCH:-2048}"
 UBATCH="${LLAMACPP_UBATCH:-1024}"
 NGL="${LLAMACPP_NGL:-99}"
 
-# One slot per instance by default. Halving the full 262144 context across two
-# slots made opencode auto-compaction fire at ~79K conversation tokens instead
-# of ~210K, which was the dominant annoyance; a single user rarely needs two
-# concurrent decode streams on the local box anyway, and when compaction does
-# trigger it runs in-line on the only slot — slower but always successful.
-# The Mac dual-instance orchestrator passes LLAMACPP_PARALLEL=2 explicitly to
-# keep each of its two models at two slots on the 256 GB unified-memory box.
-PARALLEL="${LLAMACPP_PARALLEL:-1}"
+# One slot per instance on Linux/Windows by default — 16 GB GPU is the cap and
+# halving the 262144 context across two slots made opencode auto-compaction fire
+# at ~79K conversation tokens instead of ~210K. Mac defaults to four slots
+# because unified memory has plenty of room (the previously-bundled 27B dense
+# companion is gone) and a single user often runs concurrent opencode + student
+# traffic through the slopgate proxy.
+if [[ "${PLATFORM}" == "mac" ]]; then
+  PARALLEL="${LLAMACPP_PARALLEL:-4}"
+else
+  PARALLEL="${LLAMACPP_PARALLEL:-1}"
+fi
 
 # Partial MoE offload: on a 16 GB CUDA GPU coexisting with whisper-server
 # (~0.9 GB resident) and Qwen3-TTS (~4.4 GB at synth peak), --n-cpu-moe 35
