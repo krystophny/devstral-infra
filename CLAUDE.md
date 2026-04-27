@@ -94,6 +94,10 @@ scripts/
   opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json. SLOPGATE_LEADER
                                 points baseURL at the proxy + emits
                                 X-Slopgate-Session header for sticky routing.
+  install_mcp_servers.sh        wire `helpy mcp-stdio` and `sloptools mcp-server`
+                                into claude/codex/opencode/qwen as stdio MCP
+                                servers. Pure stdio: no listening port, no
+                                socket, no daemon. Subprocess per session.
   build_bundle.sh               build USB-ready per-OS trees with embedded installers,
                                 bundled Node.js LTS (linux-x64/darwin-arm64/win-x64),
                                 and a fully populated offline npm cache for Pi
@@ -313,6 +317,26 @@ Override with `WHISPER_HOME`, `WHISPER_PORT`, `WHISPER_LANGUAGE`,
 `WHISPER_THREADS`, `WHISPER_MODEL`. Foreground-mode for launchd ExecStart with
 `WHISPER_EXEC=true` (mirrors `LLAMACPP_EXEC=true`).
 
+## MCP servers (stdio only)
+
+`scripts/install_mcp_servers.sh` registers the local sloppy-org MCP servers
+(`helpy mcp-stdio`, `sloptools mcp-server`) with claude, codex, opencode,
+and qwen-code. Pure stdio: there is no listening port, no unix socket, and
+no daemon — the agent spawns the MCP binary as a subprocess per session.
+On a multi-tenant box (university workstations etc.) loopback TCP would be
+reachable by every co-tenant; stdio sidesteps that entirely because the
+subprocess inherits the agent's UID and only that UID's pipes carry the
+JSON-RPC stream.
+
+Run after the binaries are on PATH:
+
+```bash
+scripts/install_mcp_servers.sh
+```
+
+Idempotent. Skips any agent CLI that isn't installed and any MCP binary
+that isn't on PATH.
+
 ## Don't reintroduce
 
 Explicitly out of scope — do not add LM Studio, vLLM, vLLM-MLX, MLX-LM, oMLX,
@@ -323,10 +347,11 @@ line so we keep control of llama-server flags), llama-server bound to
 `0.0.0.0` on any cluster node (it must always bind WG-only or loopback),
 the bundled llama.cpp web UI on a network-reachable interface (always
 launch with `--no-webui`), the slopgate balancer's `--slots-endpoint-
-enable` flag (it leaks per-slot prompt content), or anything that auto-
-downloads another model family beyond the small manual alias list in
-`scripts/llamacpp_models.py`. If one of those becomes useful again, add it
-deliberately and update this file.
+enable` flag (it leaks per-slot prompt content), TCP/HTTP MCP daemons for
+helpy or sloptools (they're stdio-only on purpose so no co-tenant can
+reach them), or anything that auto-downloads another model family beyond
+the small manual alias list in `scripts/llamacpp_models.py`. If one of
+those becomes useful again, add it deliberately and update this file.
 
 ## USB stick note
 
