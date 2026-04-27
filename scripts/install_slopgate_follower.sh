@@ -40,6 +40,11 @@ copy the template and fill in your values:
   \$EDITOR ${ENV_FILE}"
 fi
 
+set -o allexport
+# shellcheck disable=SC1090
+source "${ENV_FILE}"
+set +o allexport
+
 resolve_slopgate_bin() {
   if [[ -n "${SLOPGATE_BIN}" && -x "${SLOPGATE_BIN}" ]]; then
     echo "${SLOPGATE_BIN}"
@@ -75,7 +80,13 @@ case "${PLATFORM}" in
 
     AGENT_UNIT="${UNIT_DIR}/slopgate-agent.service"
 
-    cat > "${AGENT_UNIT}" <<UNIT
+    AGENT_AUDIO_LINE=""
+    if [[ -n "${SLOPGATE_AUDIO_LLAMACPP_ADDR:-}" ]]; then
+      AGENT_AUDIO_LINE="  --audio-llamacpp-addr \${SLOPGATE_AUDIO_LLAMACPP_ADDR} \\"$'\n'
+    fi
+
+    {
+      cat <<UNIT
 [Unit]
 Description=slopgate agent (registers local llama-server with the leader)
 After=network.target
@@ -87,8 +98,9 @@ ExecStart=${EXEC_BIN} agent \\
   --management-addr \${SLOPGATE_LEADER_MANAGEMENT_ADDR} \\
   --external-llamacpp-addr \${SLOPGATE_EXTERNAL_LLAMACPP_ADDR} \\
   --local-llamacpp-addr \${SLOPGATE_LOCAL_LLAMACPP_ADDR} \\
-  --slots \${SLOPGATE_SLOTS} \\
-  --name \${SLOPGATE_AGENT_NAME}
+  --max-context \${SLOPGATE_MAX_CONTEXT} \\
+  --model-alias \${SLOPGATE_MODEL_ALIAS} \\
+${AGENT_AUDIO_LINE}  --name \${SLOPGATE_AGENT_NAME}
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${RUN_DIR}/slopgate-agent.log
@@ -97,6 +109,7 @@ StandardError=inherit
 [Install]
 WantedBy=default.target
 UNIT
+    } > "${AGENT_UNIT}"
 
     echo "wrote: ${AGENT_UNIT}"
 
@@ -122,11 +135,13 @@ UNIT
     AGENTS_DIR="${AGENTS_DIR:-${HOME}/Library/LaunchAgents}"
     mkdir -p "${AGENTS_DIR}" "${RUN_DIR}"
 
-    # shellcheck disable=SC1090
-    source "${ENV_FILE}"
-
     AGENT_LABEL=com.slopcode.slopgate-agent
     AGENT_PLIST="${AGENTS_DIR}/${AGENT_LABEL}.plist"
+
+    AGENT_AUDIO_XML=""
+    if [[ -n "${SLOPGATE_AUDIO_LLAMACPP_ADDR:-}" ]]; then
+      AGENT_AUDIO_XML="    <string>--audio-llamacpp-addr</string><string>${SLOPGATE_AUDIO_LLAMACPP_ADDR}</string>"$'\n'
+    fi
 
     cat > "${AGENT_PLIST}" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
@@ -144,8 +159,9 @@ UNIT
     <string>--management-addr</string><string>${SLOPGATE_LEADER_MANAGEMENT_ADDR}</string>
     <string>--external-llamacpp-addr</string><string>${SLOPGATE_EXTERNAL_LLAMACPP_ADDR}</string>
     <string>--local-llamacpp-addr</string><string>${SLOPGATE_LOCAL_LLAMACPP_ADDR}</string>
-    <string>--slots</string><string>${SLOPGATE_SLOTS}</string>
-    <string>--name</string><string>${SLOPGATE_AGENT_NAME}</string>
+    <string>--max-context</string><string>${SLOPGATE_MAX_CONTEXT}</string>
+    <string>--model-alias</string><string>${SLOPGATE_MODEL_ALIAS}</string>
+${AGENT_AUDIO_XML}    <string>--name</string><string>${SLOPGATE_AGENT_NAME}</string>
   </array>
   <key>StandardOutPath</key><string>${RUN_DIR}/slopgate-agent.log</string>
   <key>StandardErrorPath</key><string>${RUN_DIR}/slopgate-agent.log</string>

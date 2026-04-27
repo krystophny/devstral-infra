@@ -24,9 +24,15 @@ leader_env_file() {
   cat > "${env_file}" <<EOF
 SLOPGATE_REVERSEPROXY_ADDR=0.0.0.0:8080
 SLOPGATE_MANAGEMENT_ADDR=0.0.0.0:8085
+SLOPGATE_DASHBOARD_ENABLE=true
+SLOPGATE_OVERBOOK_FACTOR=1.5
+SLOPGATE_AGENT_STALE_AFTER=10
+SLOPGATE_AGENT_EVICT_AFTER=30
+SLOPGATE_DEFAULT_T_OUT=4096
+SLOPGATE_SESSION_LRU_CAPACITY=10000
+SLOPGATE_SESSION_TTL=1800
 SLOPGATE_LOCAL_AGENT_NAME=leader
 SLOPGATE_LOCAL_LLAMACPP_ADDR=127.0.0.1:8081
-SLOPGATE_LOCAL_SLOTS=1
 SLOPGATE_LOCAL_MAX_CONTEXT=262144
 SLOPGATE_LOCAL_MODEL_ALIAS=qwen
 EOF
@@ -39,7 +45,6 @@ SLOPGATE_LEADER_MANAGEMENT_ADDR=10.77.0.1:8085
 SLOPGATE_LOCAL_LLAMACPP_ADDR=127.0.0.1:8080
 SLOPGATE_EXTERNAL_LLAMACPP_ADDR=10.77.0.10:8080
 SLOPGATE_AGENT_NAME=follower-1
-SLOPGATE_SLOTS=4
 SLOPGATE_MAX_CONTEXT=262144
 SLOPGATE_MODEL_ALIAS=qwen
 EOF
@@ -68,9 +73,17 @@ test_leader_install_dry_run() {
         && grep -q '<string>balancer</string>' "${b}" \
         && grep -q '<string>0.0.0.0:8080</string>' "${b}" \
         && grep -q '<string>0.0.0.0:8085</string>' "${b}" \
+        && grep -q '<string>--overbook-factor</string>' "${b}" \
+        && grep -q '<string>1.5</string>' "${b}" \
+        && grep -q '<string>--management-dashboard-enable</string>' "${b}" \
         && grep -q '<string>agent</string>' "${a}" \
         && grep -q '<string>127.0.0.1:8081</string>' "${a}" \
-        && grep -q '<string>leader</string>' "${a}"; then
+        && grep -q '<string>--max-context</string>' "${a}" \
+        && grep -q '<string>262144</string>' "${a}" \
+        && grep -q '<string>--model-alias</string>' "${a}" \
+        && grep -q '<string>qwen</string>' "${a}" \
+        && grep -q '<string>leader</string>' "${a}" \
+        && ! grep -q '<string>--slots</string>' "${a}"; then
         echo "PASS: balancer + agent plists carry the env-file values"
       else
         echo "FAIL: leader plists missing expected fields"
@@ -94,9 +107,14 @@ test_leader_install_dry_run() {
         && grep -q "^EnvironmentFile=${env_file}$" "${b}" \
         && grep -q 'ExecStart=.* balancer ' "${b}" \
         && grep -q -- '--reverseproxy-addr ${SLOPGATE_REVERSEPROXY_ADDR}' "${b}" \
+        && grep -q -- '--overbook-factor ${SLOPGATE_OVERBOOK_FACTOR}' "${b}" \
+        && grep -q -- '--management-dashboard-enable' "${b}" \
         && grep -q "^EnvironmentFile=${env_file}$" "${a}" \
         && grep -q 'ExecStart=.* agent ' "${a}" \
-        && grep -q -- '--name ${SLOPGATE_LOCAL_AGENT_NAME}' "${a}"; then
+        && grep -q -- '--max-context ${SLOPGATE_LOCAL_MAX_CONTEXT}' "${a}" \
+        && grep -q -- '--model-alias ${SLOPGATE_LOCAL_MODEL_ALIAS}' "${a}" \
+        && grep -q -- '--name ${SLOPGATE_LOCAL_AGENT_NAME}' "${a}" \
+        && ! grep -q -- '--slots' "${a}"; then
         echo "PASS: balancer + agent units source ${env_file} and pass through env vars"
       else
         echo "FAIL: leader units missing expected fields"
@@ -133,7 +151,9 @@ test_follower_install_dry_run() {
         && grep -q '<string>10.77.0.1:8085</string>' "${a}" \
         && grep -q '<string>10.77.0.10:8080</string>' "${a}" \
         && grep -q '<string>follower-1</string>' "${a}" \
-        && grep -q '<string>4</string>' "${a}"; then
+        && grep -q '<string>--max-context</string>' "${a}" \
+        && grep -q '<string>--model-alias</string>' "${a}" \
+        && ! grep -q '<string>--slots</string>' "${a}"; then
         echo "PASS: follower agent plist carries the env-file values"
       else
         echo "FAIL: follower plist missing expected fields"
@@ -156,7 +176,10 @@ test_follower_install_dry_run() {
         && grep -q "^EnvironmentFile=${env_file}$" "${a}" \
         && grep -q -- '--management-addr ${SLOPGATE_LEADER_MANAGEMENT_ADDR}' "${a}" \
         && grep -q -- '--external-llamacpp-addr ${SLOPGATE_EXTERNAL_LLAMACPP_ADDR}' "${a}" \
-        && grep -q -- '--name ${SLOPGATE_AGENT_NAME}' "${a}"; then
+        && grep -q -- '--max-context ${SLOPGATE_MAX_CONTEXT}' "${a}" \
+        && grep -q -- '--model-alias ${SLOPGATE_MODEL_ALIAS}' "${a}" \
+        && grep -q -- '--name ${SLOPGATE_AGENT_NAME}' "${a}" \
+        && ! grep -q -- '--slots' "${a}"; then
         echo "PASS: follower agent unit sources ${env_file} (no balancer unit installed)"
       else
         echo "FAIL: follower unit missing expected fields"

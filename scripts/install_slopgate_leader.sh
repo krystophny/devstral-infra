@@ -40,6 +40,15 @@ copy the template and fill in your values:
   \$EDITOR ${ENV_FILE}"
 fi
 
+# Pull values out of the env file so we can decide which optional flags to
+# emit. The unit/plist still references ${VAR} so updates to the file flow
+# through without re-running the installer (Linux/systemd) or take effect on
+# the next launchctl bootstrap (macOS).
+set -o allexport
+# shellcheck disable=SC1090
+source "${ENV_FILE}"
+set +o allexport
+
 resolve_slopgate_bin() {
   if [[ -n "${SLOPGATE_BIN}" && -x "${SLOPGATE_BIN}" ]]; then
     echo "${SLOPGATE_BIN}"
@@ -68,6 +77,11 @@ else
   EXEC_BIN="${SLOPGATE_BIN:-${LOCAL_BIN_DIR}/slopgate}"
 fi
 
+DASHBOARD_FLAG=""
+if [[ "${SLOPGATE_DASHBOARD_ENABLE:-false}" == "true" ]]; then
+  DASHBOARD_FLAG="--management-dashboard-enable"
+fi
+
 case "${PLATFORM}" in
   linux|wsl)
     UNIT_DIR="${UNIT_DIR:-${HOME}/.config/systemd/user}"
@@ -76,7 +90,8 @@ case "${PLATFORM}" in
     BALANCER_UNIT="${UNIT_DIR}/slopgate-balancer.service"
     AGENT_UNIT="${UNIT_DIR}/slopgate-agent.service"
 
-    cat > "${BALANCER_UNIT}" <<UNIT
+    {
+      cat <<UNIT
 [Unit]
 Description=slopgate balancer (slot-aware reverse proxy for llama.cpp)
 After=network.target
@@ -86,7 +101,14 @@ Type=simple
 EnvironmentFile=${ENV_FILE}
 ExecStart=${EXEC_BIN} balancer \\
   --management-addr \${SLOPGATE_MANAGEMENT_ADDR} \\
-  --reverseproxy-addr \${SLOPGATE_REVERSEPROXY_ADDR}
+  --reverseproxy-addr \${SLOPGATE_REVERSEPROXY_ADDR} \\
+  --overbook-factor \${SLOPGATE_OVERBOOK_FACTOR} \\
+  --agent-stale-after \${SLOPGATE_AGENT_STALE_AFTER} \\
+  --agent-evict-after \${SLOPGATE_AGENT_EVICT_AFTER} \\
+  --default-t-out \${SLOPGATE_DEFAULT_T_OUT} \\
+  --session-lru-capacity \${SLOPGATE_SESSION_LRU_CAPACITY} \\
+  --session-ttl \${SLOPGATE_SESSION_TTL}${DASHBOARD_FLAG:+ \\
+  $DASHBOARD_FLAG}
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${RUN_DIR}/slopgate-balancer.log
@@ -95,8 +117,15 @@ StandardError=inherit
 [Install]
 WantedBy=default.target
 UNIT
+    } > "${BALANCER_UNIT}"
 
-    cat > "${AGENT_UNIT}" <<UNIT
+    AGENT_AUDIO_LINE=""
+    if [[ -n "${SLOPGATE_LOCAL_AUDIO_LLAMACPP_ADDR:-}" ]]; then
+      AGENT_AUDIO_LINE="  --audio-llamacpp-addr \${SLOPGATE_LOCAL_AUDIO_LLAMACPP_ADDR} \\"$'\n'
+    fi
+
+    {
+      cat <<UNIT
 [Unit]
 Description=slopgate agent (registers local llama-server with the balancer)
 After=network.target slopgate-balancer.service
@@ -108,8 +137,9 @@ ExecStart=${EXEC_BIN} agent \\
   --management-addr \${SLOPGATE_MANAGEMENT_ADDR} \\
   --external-llamacpp-addr \${SLOPGATE_LOCAL_LLAMACPP_ADDR} \\
   --local-llamacpp-addr \${SLOPGATE_LOCAL_LLAMACPP_ADDR} \\
-  --slots \${SLOPGATE_LOCAL_SLOTS} \\
-  --name \${SLOPGATE_LOCAL_AGENT_NAME}
+  --max-context \${SLOPGATE_LOCAL_MAX_CONTEXT} \\
+  --model-alias \${SLOPGATE_LOCAL_MODEL_ALIAS} \\
+${AGENT_AUDIO_LINE}  --name \${SLOPGATE_LOCAL_AGENT_NAME}
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${RUN_DIR}/slopgate-agent.log
@@ -118,6 +148,7 @@ StandardError=inherit
 [Install]
 WantedBy=default.target
 UNIT
+    } > "${AGENT_UNIT}"
 
     echo "wrote: ${BALANCER_UNIT}"
     echo "wrote: ${AGENT_UNIT}"
@@ -146,13 +177,15 @@ UNIT
     AGENTS_DIR="${AGENTS_DIR:-${HOME}/Library/LaunchAgents}"
     mkdir -p "${AGENTS_DIR}" "${RUN_DIR}"
 
-    # shellcheck disable=SC1090
-    source "${ENV_FILE}"
-
     BALANCER_LABEL=com.slopcode.slopgate-balancer
     AGENT_LABEL=com.slopcode.slopgate-agent
     BALANCER_PLIST="${AGENTS_DIR}/${BALANCER_LABEL}.plist"
     AGENT_PLIST="${AGENTS_DIR}/${AGENT_LABEL}.plist"
+
+    BALANCER_DASHBOARD_XML=""
+    if [[ -n "${DASHBOARD_FLAG}" ]]; then
+      BALANCER_DASHBOARD_XML="    <string>${DASHBOARD_FLAG}</string>"$'\n'
+    fi
 
     cat > "${BALANCER_PLIST}" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
@@ -169,12 +202,23 @@ UNIT
     <string>balancer</string>
     <string>--management-addr</string><string>${SLOPGATE_MANAGEMENT_ADDR}</string>
     <string>--reverseproxy-addr</string><string>${SLOPGATE_REVERSEPROXY_ADDR}</string>
-  </array>
+    <string>--overbook-factor</string><string>${SLOPGATE_OVERBOOK_FACTOR}</string>
+    <string>--agent-stale-after</string><string>${SLOPGATE_AGENT_STALE_AFTER}</string>
+    <string>--agent-evict-after</string><string>${SLOPGATE_AGENT_EVICT_AFTER}</string>
+    <string>--default-t-out</string><string>${SLOPGATE_DEFAULT_T_OUT}</string>
+    <string>--session-lru-capacity</string><string>${SLOPGATE_SESSION_LRU_CAPACITY}</string>
+    <string>--session-ttl</string><string>${SLOPGATE_SESSION_TTL}</string>
+${BALANCER_DASHBOARD_XML}  </array>
   <key>StandardOutPath</key><string>${RUN_DIR}/slopgate-balancer.log</string>
   <key>StandardErrorPath</key><string>${RUN_DIR}/slopgate-balancer.log</string>
 </dict>
 </plist>
 XML
+
+    AGENT_AUDIO_XML=""
+    if [[ -n "${SLOPGATE_LOCAL_AUDIO_LLAMACPP_ADDR:-}" ]]; then
+      AGENT_AUDIO_XML="    <string>--audio-llamacpp-addr</string><string>${SLOPGATE_LOCAL_AUDIO_LLAMACPP_ADDR}</string>"$'\n'
+    fi
 
     cat > "${AGENT_PLIST}" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
@@ -192,8 +236,9 @@ XML
     <string>--management-addr</string><string>${SLOPGATE_MANAGEMENT_ADDR}</string>
     <string>--external-llamacpp-addr</string><string>${SLOPGATE_LOCAL_LLAMACPP_ADDR}</string>
     <string>--local-llamacpp-addr</string><string>${SLOPGATE_LOCAL_LLAMACPP_ADDR}</string>
-    <string>--slots</string><string>${SLOPGATE_LOCAL_SLOTS}</string>
-    <string>--name</string><string>${SLOPGATE_LOCAL_AGENT_NAME}</string>
+    <string>--max-context</string><string>${SLOPGATE_LOCAL_MAX_CONTEXT}</string>
+    <string>--model-alias</string><string>${SLOPGATE_LOCAL_MODEL_ALIAS}</string>
+${AGENT_AUDIO_XML}    <string>--name</string><string>${SLOPGATE_LOCAL_AGENT_NAME}</string>
   </array>
   <key>StandardOutPath</key><string>${RUN_DIR}/slopgate-agent.log</string>
   <key>StandardErrorPath</key><string>${RUN_DIR}/slopgate-agent.log</string>
