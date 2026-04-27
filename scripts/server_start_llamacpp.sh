@@ -20,8 +20,15 @@
 #   LLAMACPP_INSTANCE     name suffix for pid/port/log files (default: empty -> .run/llamacpp.*)
 #   LLAMACPP_SERVED_ALIAS --alias served in /v1/models (default: qwen)
 #   LLAMACPP_CONTEXT      total context size across slots (default 262144, full ctx for one slot)
-#   LLAMACPP_PORT         listen port (default 8080)
-#   LLAMACPP_HOST         bind host (default 0.0.0.0)
+#   LLAMACPP_PORT         listen port (default 8080; 8081 when the local
+#                         slopgate-balancer/agent unit is installed so the
+#                         proxy can take 8080)
+#   LLAMACPP_HOST         bind host (default 0.0.0.0; 127.0.0.1 when the
+#                         local slopgate-agent unit is installed)
+#   LLAMACPP_BIND_LOOPBACK
+#                         true to force --host 127.0.0.1 regardless of
+#                         slopgate detection (followers behind a remote
+#                         balancer)
 #   LLAMACPP_PARALLEL     concurrent slots (default 1; Mac orchestrator passes 2)
 #   LLAMACPP_N_CPU_MOE    number of MoE expert layers to keep on CPU
 #                         (default 35 on non-Mac -> 5/40 expert layers on GPU;
@@ -88,8 +95,33 @@ fi
   || die "mmproj file missing: ${MMPROJ_PATH}"
 
 # --- Runtime parameters ---
-HOST="${LLAMACPP_HOST:-0.0.0.0}"
-PORT="${LLAMACPP_PORT:-8080}"
+slopgate_present() {
+  case "${PLATFORM}" in
+    mac)
+      [[ -f "${HOME}/Library/LaunchAgents/com.slopcode.slopgate-balancer.plist" \
+        || -f "${HOME}/Library/LaunchAgents/com.slopcode.slopgate-agent.plist" ]]
+      ;;
+    linux|wsl)
+      [[ -f "${HOME}/.config/systemd/user/slopgate-balancer.service" \
+        || -f "${HOME}/.config/systemd/user/slopgate-agent.service" ]]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+HOST_DEFAULT=0.0.0.0
+PORT_DEFAULT=8080
+if [[ "${LLAMACPP_BIND_LOOPBACK:-false}" == "true" ]]; then
+  HOST_DEFAULT=127.0.0.1
+  PORT_DEFAULT=8080
+elif slopgate_present; then
+  HOST_DEFAULT=127.0.0.1
+  PORT_DEFAULT=8081
+fi
+HOST="${LLAMACPP_HOST:-${HOST_DEFAULT}}"
+PORT="${LLAMACPP_PORT:-${PORT_DEFAULT}}"
 if [[ "${PLATFORM}" == "mac" ]]; then
   CONTEXT="${LLAMACPP_CONTEXT:-1048576}"
 else

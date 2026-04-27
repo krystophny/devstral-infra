@@ -483,6 +483,75 @@ EOF
   fi
 }
 
+test_server_start_loopback_slopgate() {
+  echo "TEST: launcher binds loopback when LLAMACPP_BIND_LOOPBACK=true or slopgate unit present"
+  local home_dir="${TMPDIR}/home-loopback"
+  local model_path="${TMPDIR}/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf"
+  local mmproj_path="${TMPDIR}/mmproj-loopback.gguf"
+  mkdir -p "${home_dir}/.local/llama.cpp"
+  cat > "${home_dir}/.local/llama.cpp/llama-server" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${home_dir}/.local/llama.cpp/llama-server"
+  : > "${model_path}"
+  : > "${mmproj_path}"
+
+  local explicit_out
+  explicit_out="$(
+    HOME="${home_dir}" \
+    LLAMACPP_HOME="${home_dir}/.local/llama.cpp" \
+    LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_MMPROJ="${mmproj_path}" \
+    LLAMACPP_BIND_LOOPBACK=true \
+    LLAMACPP_SMOKE_TEST=false \
+    LLAMACPP_DRY_RUN=true \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  if [[ "${explicit_out}" == *"--host 127.0.0.1"* && "${explicit_out}" == *"--port 8080"* ]]; then
+    echo "PASS: LLAMACPP_BIND_LOOPBACK=true forces --host 127.0.0.1 on the default port"
+  else
+    echo "FAIL: LLAMACPP_BIND_LOOPBACK=true did not force loopback bind"
+    echo "${explicit_out}"
+    return 1
+  fi
+
+  local detect_home="${TMPDIR}/home-detect"
+  mkdir -p "${detect_home}/.local/llama.cpp"
+  cat > "${detect_home}/.local/llama.cpp/llama-server" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${detect_home}/.local/llama.cpp/llama-server"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    mkdir -p "${detect_home}/Library/LaunchAgents"
+    : > "${detect_home}/Library/LaunchAgents/com.slopcode.slopgate-balancer.plist"
+  else
+    mkdir -p "${detect_home}/.config/systemd/user"
+    : > "${detect_home}/.config/systemd/user/slopgate-balancer.service"
+  fi
+
+  local detect_out
+  detect_out="$(
+    HOME="${detect_home}" \
+    LLAMACPP_HOME="${detect_home}/.local/llama.cpp" \
+    LLAMACPP_MODEL="${model_path}" \
+    LLAMACPP_MMPROJ="${mmproj_path}" \
+    LLAMACPP_SMOKE_TEST=false \
+    LLAMACPP_DRY_RUN=true \
+    bash "${REPO_ROOT}/scripts/server_start_llamacpp.sh"
+  )"
+
+  if [[ "${detect_out}" == *"--host 127.0.0.1"* && "${detect_out}" == *"--port 8081"* ]]; then
+    echo "PASS: presence of slopgate unit flips bind to 127.0.0.1:8081"
+  else
+    echo "FAIL: slopgate unit detection did not flip bind"
+    echo "${detect_out}"
+    return 1
+  fi
+}
+
 test_install_linux_systemd_dry_run() {
   if [[ "$(uname -s)" != "Linux" ]]; then
     echo "SKIP: install_linux_systemd dry-run (Linux-only)"
@@ -520,6 +589,7 @@ test_install_linux_systemd_dry_run() {
 test_server_start_dry_run || FAILED=$((FAILED + 1))
 test_server_start_instance_overrides || FAILED=$((FAILED + 1))
 test_server_start_thread_override || FAILED=$((FAILED + 1))
+test_server_start_loopback_slopgate || FAILED=$((FAILED + 1))
 test_server_exec_mode || FAILED=$((FAILED + 1))
 test_server_legacy_cpu_moe_fallback || FAILED=$((FAILED + 1))
 test_opencode_config || FAILED=$((FAILED + 1))
