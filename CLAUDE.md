@@ -7,25 +7,24 @@ Guidance for Claude Code working inside this repository.
 One blessed local coding stack, nothing else:
 
 - **Runtime**: `llama-server` from the latest upstream ggml-org/llama.cpp release.
-- **Models**:
-  - `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M` — alias `qwen3.6-35b-a3b-q4`.
-  - `bartowski/Qwen_Qwen3.6-27B-GGUF` at `Q4_K_M` — alias `qwen3.6-27b-q4` (macOS only).
+- **Model**: `bartowski/Qwen_Qwen3.6-35B-A3B-GGUF` at `Q4_K_M` — alias
+  `qwen3.6-35b-a3b-q4`. The same model on every platform.
 - **Harness**: `opencode` CLI, title generation disabled, reasoning on.
+- **Optional load balancer**: `sloppy-org/slopgate` (fork of distantmagic/
+  paddler v1.x) for multi-host deployments. See "Multi-host (slopgate)" below.
 
-macOS runs a dual-instance deployment — dense 27B on port `8081` (OpenCode
-default) and MoE 35B-A3B on port `8080` (small_model, USB bundle port).
-Linux/Windows and the USB bundles keep the single-instance 35B-A3B on port
-`8080`. The launcher binds `0.0.0.0` by default so the host can also expose the
-service on the LAN.
+The launcher binds `0.0.0.0:8080` by default. When a slopgate balancer or
+agent unit is locally installed, the launcher flips to `127.0.0.1:8081` so the
+proxy can take `:8080`.
 
-| OS      | Backend | Instances | Models served                   | User service        |
-| ------- | ------- | --------- | ------------------------------- | ------------------- |
-| Linux   | CUDA    | 1         | 35B-A3B `qwen` :8080            | `systemd --user`    |
-| Windows | Vulkan  | 1         | 35B-A3B `qwen` :8080            | `schtasks ONLOGON`  |
-| macOS   | Metal   | 2         | 27B `qwen-27b` :8081, 35B-A3B `qwen-35b-a3b` :8080 | launchd user agent |
+| OS      | Backend | Instances | Model + alias              | User service        |
+| ------- | ------- | --------- | -------------------------- | ------------------- |
+| Linux   | CUDA    | 1         | 35B-A3B `qwen` :8080       | `systemd --user`    |
+| Windows | Vulkan  | 1         | 35B-A3B `qwen` :8080       | `schtasks ONLOGON`  |
+| macOS   | Metal   | 1         | 35B-A3B `qwen` :8080       | launchd user agent  |
 
-No root or admin is required anywhere. The only automatic downloads are the two
-GGUFs (one on non-Mac) and the two binaries.
+No root or admin is required anywhere. The only automatic downloads are the
+single GGUF and the llama-server binary.
 
 The Linux service is installed by `scripts/install_linux_systemd.sh`: it writes
 `~/.config/systemd/user/slopcode-llamacpp.service`, whose ExecStart invokes
@@ -79,23 +78,36 @@ scripts/
   opencode_privacy.sh           pin OPENCODE_DISABLE_* env vars in ~/.profile + environment.d (idempotent)
   llamacpp_models.py            default + optional model aliases; prefetch/resolve
   server_start_llamacpp.sh      single-instance launcher; LLAMACPP_EXEC=true
-                                replaces the shell with llama-server for systemd
+                                replaces the shell with llama-server for systemd.
+                                Flips to 127.0.0.1:8081 when slopgate is locally
+                                installed; LLAMACPP_BIND_LOOPBACK=true forces it
+                                without slopgate detection (followers).
   server_stop_llamacpp.sh
-  server_start_mac.sh           macOS dual-instance orchestrator (35B :8080 + 27B :8081)
-  server_stop_mac.sh
   install_linux_systemd.sh      write & enable ~/.config/systemd/user/slopcode-
                                 llamacpp.service; enable-linger for boot autostart
-  install_mac_launchagents.sh   macOS launchd user agents for the dual-instance stack
+  install_mac_launchagents.sh   macOS launchd user agent (single 35B-A3B instance)
+  install_slopgate_leader.sh    install slopgate balancer + co-located agent
+                                (sources ~/.config/slopgate/leader.env)
+  install_slopgate_follower.sh  install slopgate agent only (sources
+                                ~/.config/slopgate/follower.env)
   opencode_install.sh           curl|bash (online) or OPENCODE_OFFLINE_ARCHIVE (USB)
-  opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json (dual on Mac, single on PC)
+  opencode_set_llamacpp.sh      write ~/.config/opencode/opencode.json. SLOPGATE_LEADER
+                                points baseURL at the proxy + emits
+                                X-Slopgate-Session header for sticky routing.
   build_bundle.sh               build USB-ready per-OS trees with embedded installers,
                                 bundled Node.js LTS (linux-x64/darwin-arm64/win-x64),
                                 and a fully populated offline npm cache for Pi
   usb_format.sh                 exFAT format + skeleton (requires sudo, typed confirm)
 
+config/slopgate/
+  leader.env.example            template for ~/.config/slopgate/leader.env
+  follower.env.example          template for ~/.config/slopgate/follower.env
+
 ci/
-  run_tests.sh                  runs the two suites below
+  run_tests.sh                  runs the three suites below
   test_llamacpp_profile.sh      launcher dry-run + opencode config assertions
+  test_slopgate_profile.sh      install_slopgate_{leader,follower} dry-run +
+                                gitignore behaviour
   test_server_health.sh         pure-stdlib mock server
   mock_server.py
 ```
@@ -110,13 +122,15 @@ Every instance launched through `server_start_llamacpp.sh` always passes:
 --reasoning on
 ```
 
-`-np`, `-ub`, and MoE placement are caller/platform-dependent. The launcher
-defaults to `-np 1 -ub 1024 --n-cpu-moe 35` (partial MoE offload, 5/40
-routed-expert layers on GPU, small enough compute buffer to coexist with
-whisper-server and Qwen3-TTS). The Mac orchestrator passes
-`LLAMACPP_PARALLEL=2` and no MoE split. Per-slot context lands at the
-model's native `n_ctx_train` (262144) on every platform, so no YaRN
-scaling is involved.
+`-np`, `-ub`, and MoE placement are caller/platform-dependent. Linux/Windows
+default to `-np 1 -ub 1024 --n-cpu-moe 35 -c 262144` (partial MoE offload,
+5/40 routed-expert layers on GPU, small compute buffer to coexist with
+whisper-server and Qwen3-TTS). Mac defaults to `-np 4 -ub 1024 -c 1048576`
+(four slots × 256K each, no MoE split — Metal handles experts in unified
+memory). The 27B dense companion that previously occupied the Mac's second
+port is gone; the freed unified-memory budget pays for the four-slot config.
+Per-slot context lands at the model's native `n_ctx_train` (262144) on every
+platform, so no YaRN scaling is involved.
 
 On Linux/Windows partial MoE offload replaces the old blanket `--cpu-moe`.
 Benchmark on RTX 5060 Ti 16 GB with Qwen3.6-35B-A3B Q4_K_M at c=262144:
@@ -151,25 +165,60 @@ per invocation via `LLAMACPP_THREADS` / `LLAMACPP_THREADS_HTTP`.
 
 Default deployment per platform:
 
-| Host            | Instances                        | `--alias`                    | `-np` | `-c`   | Per-slot ctx |
-| --------------- | -------------------------------- | ---------------------------- | ----- | ------ | ------------ |
-| Linux / Windows | 35B-A3B on :8080                 | `qwen`                       | 1     | 262144 | 262144       |
-| macOS           | 35B-A3B on :8080, 27B on :8081   | `qwen-35b-a3b`, `qwen-27b`   | 2 ea. | 524288 | 262144       |
+| Host            | Instances        | `--alias` | `-np` | `-c`     | Per-slot ctx |
+| --------------- | ---------------- | --------- | ----- | -------- | ------------ |
+| Linux / Windows | 35B-A3B on :8080 | `qwen`    | 1     | 262144   | 262144       |
+| macOS           | 35B-A3B on :8080 | `qwen`    | 4     | 1048576  | 262144       |
 
 Every slot on every platform gets 256K — exactly the model's native
 `n_ctx_train`. Linux/Windows run one slot because a single local user rarely
 needs two concurrent decode streams and halving the window made opencode
-auto-compaction fire at ~79K conversation tokens instead of ~210K (compaction
-triggers at `context - 32K output - 20K buffer`). With `-np 1` compaction
-still blocks the only slot for the duration of the summary call, but the user
-gets ~2.6× more working context before that happens and the session always
-recovers. On Mac the dense 27B's KV cache per token is ~3× the MoE's (64
-layers / 4 KV heads vs 40 / 2): at 256K per slot the 27B's KV envelope is
-~68 GiB, and combined footprint for both instances is ~130 GiB on the 256 GB
-box.
+auto-compaction fire at ~79K conversation tokens instead of ~210K. With
+`-np 1` compaction still blocks the only slot for the duration of the summary
+call, but the user gets ~2.6× more working context before that happens and
+the session always recovers. macOS runs four slots because the M3 Ultra has
+unified memory to spare — combined opencode + student traffic through a
+slopgate proxy benefits from concurrent decode streams.
 
-Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`. The
-Mac orchestrator also accepts these and forwards them to both instances.
+Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`.
+
+## Multi-host (slopgate)
+
+For deployments spanning more than one box, `sloppy-org/slopgate` (a private
+fork of `distantmagic/paddler` v1.2.1-rc1, MIT-licensed) is a slot-aware
+reverse proxy that fronts every node's `llama-server` on a single port.
+
+**Topology.** A leader runs `slopgate balancer` on `0.0.0.0:8080` and a
+co-located `slopgate agent`. Each follower runs `slopgate agent` only,
+registering its local `llama-server` with the leader's management endpoint
+over a private network (WireGuard or LAN). When followers go offline they
+drop out of rotation; when they come back they re-register on the next
+heartbeat.
+
+**Routing.** Power-of-Two-Choices over the free-slot count, filtered by
+KV-cache headroom so a long-context request never lands on a slot that can't
+fit it. Optional sticky session affinity via the `X-Slopgate-Session` header
+(opencode emits this automatically when `SLOPGATE_LEADER` is configured).
+
+**Configuration.** Per-host capability data and topology live in env files
+outside the repo:
+- `~/.config/slopgate/leader.env` — leader balancer + local agent
+- `~/.config/slopgate/follower.env` — follower agent
+
+Templates at `config/slopgate/{leader,follower}.env.example`. Real env files
+are gitignored. Concrete IPs and hostnames never leak into commits, PR
+descriptions, or issue bodies.
+
+**Install.** From the leader: `bash scripts/install_slopgate_leader.sh`.
+From each follower: `bash scripts/install_slopgate_follower.sh`. Both
+scripts link `~/.local/bin/slopgate` to the cargo build at
+`~/code/sloppy/slopgate/target/release/slopgate` and write systemd user
+units (Linux) or launchd user agents (macOS). No sudo.
+
+**opencode integration.** Set `SLOPGATE_LEADER=<wg-ip>:8080` (or just
+`<wg-ip>`) when running `scripts/opencode_set_llamacpp.sh`; baseURL becomes
+`http://<wg-ip>:8080/v1` and a stable `X-Slopgate-Session` header is added
+for sticky multi-turn routing.
 
 ## Whisper transcription server
 
@@ -211,7 +260,10 @@ Override with `WHISPER_HOME`, `WHISPER_PORT`, `WHISPER_LANGUAGE`,
 ## Don't reintroduce
 
 Explicitly out of scope — do not add LM Studio, vLLM, vLLM-MLX, MLX-LM, oMLX,
-`security_harden.sh`, dual-instance local/fast servers, or anything that auto-
+`security_harden.sh`, dual-instance local/fast servers, the macOS Qwen 27B
+dense companion as a default-installed model, intentee/paddler v2+ (the
+embedded-llama.cpp rewrite — slopgate stays on the v1.x transparent-proxy
+line so we keep control of llama-server flags), or anything that auto-
 downloads another model family beyond the small manual alias list in
 `scripts/llamacpp_models.py`. If one of those becomes useful again, add it
 deliberately and update this file.
