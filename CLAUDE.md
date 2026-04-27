@@ -125,12 +125,26 @@ Every instance launched through `server_start_llamacpp.sh` always passes:
 `-np`, `-ub`, and MoE placement are caller/platform-dependent. Linux/Windows
 default to `-np 1 -ub 1024 --n-cpu-moe 35 -c 262144` (partial MoE offload,
 5/40 routed-expert layers on GPU, small compute buffer to coexist with
-whisper-server and Qwen3-TTS). Mac defaults to `-np 4 -ub 1024 -c 1048576`
-(four slots × 256K each, no MoE split — Metal handles experts in unified
+whisper-server and Qwen3-TTS). Mac defaults to `-np 8 -ub 1024 -c 2097152`
+(eight slots × 256K each, no MoE split — Metal handles experts in unified
 memory). The 27B dense companion that previously occupied the Mac's second
-port is gone; the freed unified-memory budget pays for the four-slot config.
+port is gone; the freed unified-memory budget pays for the eight-slot config.
 Per-slot context lands at the model's native `n_ctx_train` (262144) on every
 platform, so no YaRN scaling is involved.
+
+Why eight slots on the Mac and not four: Qwen3.6-35B-A3B is a hybrid
+architecture (10/40 layers carry full-attention KV, the other 30 are Gated
+DeltaNet linear-attention with a constant ~250 MiB recurrent state). At
+q8_0 KV that puts each 256K slot at ~2.5 GiB of cache. Eight slots
+fit comfortably (~20 GiB KV + 21 GiB Q4_K_M weights + 2 GiB mmproj +
+~3 GiB compute = ~46 GiB out of 256 GiB unified memory, leaving ~180 GiB
+for whisper / Qwen3-TTS / other apps). The bandwidth-saturated decode
+ceiling on M3 Ultra is around 8 concurrent streams; per-slot decode
+falls from ~77 t/s (single user, measured) to ~55-65 t/s only when 5+
+slots are actually busy at the same time. Slopgate's `--overbook-factor 1.5`
+on top advertises 12 logical slots, deep enough to absorb burst admissions
+without ever overshooting the physical 1-request-per-slot llama-server
+invariant.
 
 On Linux/Windows partial MoE offload replaces the old blanket `--cpu-moe`.
 Benchmark on RTX 5060 Ti 16 GB with Qwen3.6-35B-A3B Q4_K_M at c=262144:
@@ -168,7 +182,7 @@ Default deployment per platform:
 | Host            | Instances        | `--alias` | `-np` | `-c`     | Per-slot ctx |
 | --------------- | ---------------- | --------- | ----- | -------- | ------------ |
 | Linux / Windows | 35B-A3B on :8080 | `qwen`    | 1     | 262144   | 262144       |
-| macOS           | 35B-A3B on :8080 | `qwen`    | 4     | 1048576  | 262144       |
+| macOS           | 35B-A3B on :8080 | `qwen`    | 8     | 2097152  | 262144       |
 
 Every slot on every platform gets 256K — exactly the model's native
 `n_ctx_train`. Linux/Windows run one slot because a single local user rarely
@@ -176,9 +190,10 @@ needs two concurrent decode streams and halving the window made opencode
 auto-compaction fire at ~79K conversation tokens instead of ~210K. With
 `-np 1` compaction still blocks the only slot for the duration of the summary
 call, but the user gets ~2.6× more working context before that happens and
-the session always recovers. macOS runs four slots because the M3 Ultra has
-unified memory to spare — combined opencode + student traffic through a
-slopgate proxy benefits from concurrent decode streams.
+the session always recovers. macOS runs eight slots because the M3 Ultra has
+unified memory to spare and Qwen3-Next's hybrid attention puts the per-slot
+KV at only ~2.5 GiB at 256K (q8) — combined opencode + student traffic
+through the slopgate proxy benefits from concurrent decode streams.
 
 Override per invocation with `LLAMACPP_PARALLEL` and `LLAMACPP_CONTEXT`.
 

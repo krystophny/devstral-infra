@@ -7,7 +7,7 @@
 #
 # Slot counts per platform:
 #   Linux/Windows: -np 1 -c 262144           (1 slot x 256K, 16 GB GPU cap)
-#   Mac:           -np 4 -c 1048576          (4 slots x 256K, M-series unified
+#   Mac:           -np 8 -c 2097152          (8 slots x 256K, M-series unified
 #                                             memory; the dropped 27B dense
 #                                             companion freed the budget)
 #
@@ -123,7 +123,7 @@ fi
 HOST="${LLAMACPP_HOST:-${HOST_DEFAULT}}"
 PORT="${LLAMACPP_PORT:-${PORT_DEFAULT}}"
 if [[ "${PLATFORM}" == "mac" ]]; then
-  CONTEXT="${LLAMACPP_CONTEXT:-1048576}"
+  CONTEXT="${LLAMACPP_CONTEXT:-2097152}"
 else
   CONTEXT="${LLAMACPP_CONTEXT:-262144}"
 fi
@@ -143,7 +143,7 @@ NGL="${LLAMACPP_NGL:-99}"
 # companion is gone) and a single user often runs concurrent opencode + student
 # traffic through the slopgate proxy.
 if [[ "${PLATFORM}" == "mac" ]]; then
-  PARALLEL="${LLAMACPP_PARALLEL:-4}"
+  PARALLEL="${LLAMACPP_PARALLEL:-8}"
 else
   PARALLEL="${LLAMACPP_PARALLEL:-1}"
 fi
@@ -199,7 +199,12 @@ DRY_RUN="${LLAMACPP_DRY_RUN:-false}"
 SMOKE_TEST="${LLAMACPP_SMOKE_TEST:-true}"
 START_TIMEOUT="${LLAMACPP_START_TIMEOUT:-900}"
 
-stop_llamacpp_port_occupants "${PORT}" "llama.cpp server"
+# Skip the live-port check on dry runs — the test harness only inspects the
+# emitted argv and shouldn't be confused by whatever is actually listening on
+# the host (e.g., a real slopgate balancer on the leader).
+if [[ "${DRY_RUN}" != "true" ]]; then
+  stop_llamacpp_port_occupants "${PORT}" "llama.cpp server"
+fi
 
 SAMPLER_ARGS=()
 case "${MODEL_ALIAS}" in

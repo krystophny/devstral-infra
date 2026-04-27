@@ -78,8 +78,8 @@ EOF
 
   local context_expected np_expected
   if [[ "${platform}" == "Darwin" ]]; then
-    context_expected="-c 1048576"
-    np_expected="-np 4"
+    context_expected="-c 2097152"
+    np_expected="-np 8"
   else
     context_expected="-c 262144"
     np_expected="-np 1"
@@ -187,7 +187,7 @@ EOF
 
   local np_expected
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    np_expected="-np 4"
+    np_expected="-np 8"
   else
     np_expected="-np 1"
   fi
@@ -454,12 +454,13 @@ EOF
     grep -qx -- '--n-cpu-moe' "${stamp}" || moe_ok=0
     grep -qx -- '35' "${stamp}" || moe_ok=0
   fi
-  local np_value
+  local np_value ub_value
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    np_value=4
+    np_value=8
   else
     np_value=1
   fi
+  ub_value=1024
   if grep -qx -- '-np' "${stamp}" \
     && grep -qx -- "${np_value}" "${stamp}" \
     && grep -qx -- '--port' "${stamp}" \
@@ -467,9 +468,9 @@ EOF
     && grep -qx -- '--reasoning-budget' "${stamp}" \
     && grep -qx -- "$(default_reasoning_budget)" "${stamp}" \
     && grep -qx -- '-ub' "${stamp}" \
-    && grep -qx -- '1024' "${stamp}" \
+    && grep -qx -- "${ub_value}" "${stamp}" \
     && [[ "${moe_ok}" == "1" ]]; then
-    echo "PASS: exec-mode argv has -np ${np_value}, -ub 1024, MoE flags correct"
+    echo "PASS: exec-mode argv has -np ${np_value}, -ub ${ub_value}, MoE flags correct"
   else
     echo "FAIL: exec-mode argv did not include expected flags"
     cat "${stamp}"
