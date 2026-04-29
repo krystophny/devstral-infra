@@ -181,8 +181,12 @@ write_whisper_plist() {
   local label="com.slopcode.whisper-server"
   local plist="${AGENTS_DIR}/${label}.plist"
   local log="${LOG_DIR_ABS}/whisper-server.log"
-  local whisper_bin="${WHISPER_SERVER_BIN:-${HOME}/.local/whisper.cpp/build/bin/whisper-server}"
-  local model_path="${WHISPER_MODEL_PATH:-${HOME}/.local/whisper.cpp/models/ggml-large-v3-turbo.bin}"
+  local whisper_default_home="${HOME}/.local/whisper.cpp"
+  if [[ -x "${HOME}/code/whisper.cpp/build/bin/whisper-server" ]]; then
+    whisper_default_home="${HOME}/code/whisper.cpp"
+  fi
+  local whisper_bin="${WHISPER_SERVER_BIN:-${whisper_default_home}/build/bin/whisper-server}"
+  local model_path="${WHISPER_MODEL_PATH:-${whisper_default_home}/models/ggml-large-v3-turbo.bin}"
   [[ -x "${whisper_bin}" ]] || die "whisper-server not built: ${whisper_bin}. Run: scripts/setup_whisper.sh"
   [[ -f "${model_path}" ]] || die "whisper model missing: ${model_path}. Run: scripts/setup_whisper.sh"
   local whisper_dir

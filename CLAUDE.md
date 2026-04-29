@@ -98,10 +98,21 @@ scripts/
                                 into claude/codex/opencode/qwen as stdio MCP
                                 servers. Pure stdio: no listening port, no
                                 socket, no daemon. Subprocess per session.
-  build_bundle.sh               build USB-ready per-OS trees with embedded installers,
-                                bundled Node.js LTS (linux-x64/darwin-arm64/win-x64),
-                                and a fully populated offline npm cache for Pi
-  usb_format.sh                 exFAT format + skeleton (requires sudo, typed confirm)
+  setup_whisper.sh              clone + build whisper.cpp from source. Defaults
+                                to ~/code/whisper.cpp when ~/code exists, else
+                                ~/.local/whisper.cpp. CUDA/Vulkan/Metal
+                                auto-detected.
+  install_linux_whisper_systemd.sh  ~/.config/systemd/user/whisper-server.service
+                                that execs server_start_whisper.sh (CUDA
+                                build, OpenAI-compatible /v1/audio/
+                                transcriptions on :8427).
+  install_voxtype_linux.sh      install upstream voxtype release artefacts
+                                + ~/.config/systemd/user/voxtype.service,
+                                pointed at the local whisper-server.
+  install_voxtype_mac.sh        documented manual path (upstream is
+                                Linux-only).
+  install_voxtype_windows.ps1   documented manual path (upstream is
+                                Linux-only).
 
 config/slopgate/
   leader.env.example            template for ~/.config/slopgate/leader.env
@@ -349,29 +360,26 @@ the bundled llama.cpp web UI on a network-reachable interface (always
 launch with `--no-webui`), the slopgate balancer's `--slots-endpoint-
 enable` flag (it leaks per-slot prompt content), TCP/HTTP MCP daemons for
 helpy or sloptools (they're stdio-only on purpose so no co-tenant can
-reach them), or anything that auto-downloads another model family beyond
-the small manual alias list in `scripts/llamacpp_models.py`. If one of
-those becomes useful again, add it deliberately and update this file.
+reach them), USB-stick bundles or any flavor of bundled-Node /
+offline-npm-cache distribution (assume system `npm` and a checkout of
+this repo on every target — see `scripts/pi_install.sh`), or anything
+that auto-downloads another model family beyond the small manual alias
+list in `scripts/llamacpp_models.py`. If one of those becomes useful
+again, add it deliberately and update this file.
 
-## USB stick note
+## Distribution model
 
-The USB layout ships the 20 GB GGUF once at the bundle root. Per-OS `start`
-scripts reference `../models/…`. exFAT is required (FAT32 chokes at 4 GB per
-file); `usb_format.sh` handles the format.
+Repo-only. Install scripts run from a checkout of this repo on the target
+machine; there is no USB-stick bundle, no exFAT formatter, no bundled Node
+runtime, no offline npm cache. Pi installs through the system `npm` via
+`scripts/pi_install.sh`; if Node is missing the script tells the user to
+install it (`pacman -S nodejs npm`, `brew install node`,
+`winget install OpenJS.NodeJS`) and exits.
 
-Each per-OS directory also carries its own Node.js LTS under `node/`
-(linux-x64, darwin-arm64, win-x64). The shared `pi/` directory holds the
-Pi tarball and a fully populated offline npm cache. The per-OS installer
-copies its `node/` into the install destination, runs `npm install -g`
-with `--prefix <dest>/node --offline --cache <bundle>/pi/npm-cache`, and
-exposes Pi as `~/.local/bin/pi` (Unix) or via a user-PATH prepend
-(Windows). No system Node, no sudo, no admin, no internet at install
-time. Outside the USB path, `scripts/pi_install.sh` keeps using the
-system npm — unchanged.
-
-The Node.js version is auto-resolved to the latest LTS via
-`https://nodejs.org/dist/index.json` at build time; override with
-`NODE_VERSION=v22.x.x scripts/build_bundle.sh ...`.
+Whisper.cpp clones into `~/code/whisper.cpp` (so the user can hack on it
+alongside the rest of `~/code`). The legacy `~/.local/whisper.cpp` install
+remains supported — `server_start_whisper.sh` and the launchd / systemd
+installers prefer whichever has a built `whisper-server` binary.
 
 ## Testing
 

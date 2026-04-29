@@ -1,8 +1,9 @@
 # slopcode-infra
 
-Single-path local coding stack: **llama.cpp + Qwen3.6 35B A3B (Q4_K_M) + OpenCode + Pi**,
-packaged so a USB stick hands it to a Linux, macOS, or Windows machine with no
-root, no admin, and no internet.
+Single-path local coding stack: **llama.cpp + Qwen3.6 35B A3B (Q4_K_M) +
+OpenCode + Pi**, plus on-demand whisper.cpp and voxtype install scripts. Every
+component lives in the user profile and runs as a user-level service. No
+root, no admin.
 
 License: [MIT](LICENSE)
 
@@ -22,65 +23,67 @@ Nothing else is downloaded automatically. Optional aliases live in
 `scripts/llamacpp_models.py` for manual prefetch only, including the FortBench
 MiniMax benchmark profiles.
 
-## Install from a USB stick
+## Install from this repo
 
-```
-./<target>/install.sh          # linux-cuda or mac-m1
-.\windows-arc\install.bat      # windows-arc (no admin)
-```
-
-The installer copies `llama.cpp/`, `opencode/`, and the model into the user
-profile (`~/.local/slopcode` on Linux, `~/Library/Application Support/slopcode`
-on macOS, `%USERPROFILE%\slopcode` on Windows), registers a user-level service
-(`systemd --user` unit `slopcode-llamacpp`, a `launchd` user agent
-`com.slopcode.llamacpp-macbook`, or a Startup-folder shortcut on Windows), and
-writes the OpenCode + Pi configs. OpenCode points at `http://127.0.0.1:8080/v1`,
-and the local launcher binds `0.0.0.0:8080` by default so the service is
-reachable on the LAN as well. The Mac Studio dual-instance layout (35B-A3B on
-`:8080` plus the 27B dense companion on `:8081`) is set up directly from this
-repo via `scripts/install_mac_launchagents.sh` and is intentionally not part of
-the USB bundle.
-
-## Install from this repo (local development)
+Every script below runs as the unprivileged user and assumes a working
+`node`/`npm` (for Pi), `git`, `cmake`, `ninja`, and `curl`. There is no USB
+bundling step and no bundled Node.js — install the system package
+(`pacman -S nodejs npm`, `brew install node`, `winget install OpenJS.NodeJS`)
+once and re-use it.
 
 ```
 scripts/setup_llamacpp.sh                     # fetch latest upstream release for this OS
 python3 scripts/llamacpp_models.py prefetch   # download the blessed model
 scripts/server_start_llamacpp.sh              # foreground run, smoke test
+scripts/install_linux_systemd.sh              # systemd --user unit (Linux)
+scripts/install_mac_launchagents.sh           # launchd user agents (macOS)
 scripts/opencode_install.sh                   # curl|bash the opencode CLI
 scripts/pi_install.sh                         # npm install Pi Coding Agent + local config
 scripts/opencode_set_llamacpp.sh              # write ~/.config/opencode/opencode.json
 opencode                                      # go
 ```
 
-## Build the USB bundle
+## Whisper.cpp (STT for voxtype, slopbox, meeting notes)
+
+Whisper.cpp builds from source against the local GPU (CUDA on Linux/NVIDIA,
+Metal on Mac, Vulkan on Linux/Windows without CUDA). The same scripts power
+the macOS launchd agent (`com.slopcode.whisper-server`) and a Linux
+`systemd --user` unit (`whisper-server.service`).
 
 ```
-python3 scripts/llamacpp_models.py prefetch   # ensure the model is cached
-scripts/build_bundle.sh all --out /tmp/slopcode
+scripts/setup_whisper.sh                      # clone + build into ~/code/whisper.cpp
+                                              # (falls back to ~/.local/whisper.cpp
+                                              #  if ~/code is absent)
+scripts/install_linux_whisper_systemd.sh      # systemd --user unit (Linux)
+scripts/install_mac_launchagents.sh           # bundles whisper-server agent on macOS
 ```
 
-Layout it produces:
+The server speaks the OpenAI `/v1/audio/transcriptions` API on
+`http://127.0.0.1:8427` so any whisper-1 client (voxtype, slopbox, the
+voice-memo classifier) works against it without changes.
+
+If a previous installation left the AUR `whisper.cpp-cuda` package in place
+the installer refuses to clobber the system unit and prints the one-time
+`sudo pacman -Rns ...` line to remove it. The new user-level unit then takes
+the same `:8427` port.
+
+## Voxtype install (push-to-talk dictation)
+
+`peteonrails/voxtype` is the Linux-native push-to-talk dictation daemon. The
+helpers below wrap the upstream release artefacts so the user does not have
+to read the upstream README before hitting the F-key.
 
 ```
-/tmp/slopcode/
-  README.txt
-  models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf
-  models/mmproj-Qwen_Qwen3.6-35B-A3B-bf16.gguf
-  linux-cuda/   {llama.cpp/, opencode/, install.sh, start.sh}
-  mac-m1/       {llama.cpp/, opencode/, install.sh, start.sh}
-  windows-arc/  {llama.cpp/, opencode/, install.bat, start.bat}
-  pi/           {npm-cache/, mariozechner-pi-coding-agent-*.tgz, install-unix.sh,
-                 install-windows.bat}
+scripts/install_voxtype_linux.sh              # systemd --user, deb/rpm fallback
+scripts/install_voxtype_mac.sh                # documented manual path (no Mac binary upstream)
+scripts/install_voxtype_windows.ps1           # documented manual path (no Windows binary upstream)
 ```
 
-Then format a USB stick to exFAT (FAT32 cannot hold the 20 GB single file) and
-copy the tree over:
-
-```
-scripts/usb_format.sh /dev/sdX SLOPCODE     # requires sudo, typed confirmation
-rsync -a /tmp/slopcode/ /run/media/$USER/SLOPCODE/
-```
+The Linux installer detects GPU class (CUDA / Vulkan / CPU-only) and pulls
+the matching release binary; it points the daemon at the local whisper
+server on `127.0.0.1:8427` by default and registers a `systemd --user`
+service. macOS and Windows scripts surface the upstream non-goal of those
+platforms instead of pretending support exists.
 
 ## Tests
 
@@ -88,5 +91,6 @@ rsync -a /tmp/slopcode/ /run/media/$USER/SLOPCODE/
 bash ci/run_tests.sh
 ```
 
-Exercises the llama.cpp launcher (dry-run), the OpenCode config generator, and
-a pure-stdlib mock-server health check. Real inference is out of scope for CI.
+Exercises the llama.cpp launcher (dry-run), the OpenCode config generator,
+the Pi config generator, and a pure-stdlib mock-server health check. Real
+inference is out of scope for CI.

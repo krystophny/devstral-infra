@@ -12,7 +12,9 @@
 # faepmac1 hits the Mac/Metal path.
 #
 # Env overrides:
-#   WHISPER_HOME        install dir (default ~/.local/whisper.cpp)
+#   WHISPER_HOME        install dir. Defaults to ~/code/whisper.cpp when
+#                       ~/code exists (so sources live alongside the rest
+#                       of the user's hackable code), else ~/.local/whisper.cpp.
 #   WHISPER_REF         git ref to check out (default master). Tracks upstream
 #                       main so we get the same flag set the README documents.
 #                       Pin to a tag (e.g. WHISPER_REF=v1.8.4) for reproducibility.
@@ -25,7 +27,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_common.sh"
 
 PLATFORM="$(detect_platform)"
-WHISPER_HOME="${WHISPER_HOME:-${HOME}/.local/whisper.cpp}"
+default_whisper_home() {
+  if [[ -d "${HOME}/code" ]]; then
+    echo "${HOME}/code/whisper.cpp"
+  else
+    echo "${HOME}/.local/whisper.cpp"
+  fi
+}
+WHISPER_HOME="${WHISPER_HOME:-$(default_whisper_home)}"
 WHISPER_REF="${WHISPER_REF:-master}"
 WHISPER_MODEL="${WHISPER_MODEL:-ggml-large-v3-turbo.bin}"
 WHISPER_MODEL_URL="${WHISPER_MODEL_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL}}"

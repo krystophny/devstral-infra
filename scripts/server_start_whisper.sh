@@ -27,7 +27,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/_common.sh"
 
-WHISPER_HOME="${WHISPER_HOME:-${HOME}/.local/whisper.cpp}"
+default_whisper_home() {
+  # Prefer the source-tree install (~/code/whisper.cpp) when it has a built
+  # server, otherwise fall back to the legacy ~/.local/whisper.cpp path.
+  if [[ -x "${HOME}/code/whisper.cpp/build/bin/whisper-server" ]]; then
+    echo "${HOME}/code/whisper.cpp"
+  elif [[ -x "${HOME}/.local/whisper.cpp/build/bin/whisper-server" ]]; then
+    echo "${HOME}/.local/whisper.cpp"
+  elif [[ -d "${HOME}/code" ]]; then
+    echo "${HOME}/code/whisper.cpp"
+  else
+    echo "${HOME}/.local/whisper.cpp"
+  fi
+}
+WHISPER_HOME="${WHISPER_HOME:-$(default_whisper_home)}"
 WHISPER_SERVER="${WHISPER_SERVER_BIN:-${WHISPER_HOME}/build/bin/whisper-server}"
 [[ -x "${WHISPER_SERVER}" ]] || die "whisper-server not built. Run: scripts/setup_whisper.sh"
 
